@@ -595,13 +595,7 @@ class Page(AbstractPage, index.Indexed, ClusterableModel, metaclass=PageBase):
         most specific form
         """
         content_type = ContentType.objects.get_for_id(self.content_type_id)
-        model_class = content_type.model_class()
-        if model_class is None:
-            # Cannot locate a model class for this content type. This might
-            # happen if the page type model has been removed, but the stale
-            # content type has yet to be deleted.
-            return type(self)
-        return model_class
+        return content_type.model_class()
 
     def route(self, request, path_components):
         if path_components:
@@ -881,9 +875,10 @@ class Page(AbstractPage, index.Indexed, ClusterableModel, metaclass=PageBase):
         # cases (e.g. loading test fixtures), may be called before the specific instance's
         # entry has been created. In those cases, we aren't ready to be indexed yet, so
         # return None.
+        page_class = self.specific_class or Page
         try:
             return self.specific
-        except self.specific_class.DoesNotExist:
+        except page_class.DoesNotExist:
             return None
 
     @classmethod
@@ -976,7 +971,8 @@ class Page(AbstractPage, index.Indexed, ClusterableModel, metaclass=PageBase):
 
         See also: :func:`Page.can_create_at` and :func:`Page.can_move_to`
         """
-        return cls in parent.specific_class.allowed_subpage_models()
+        parent_class = parent.specific_class or Page
+        return cls in parent_class.allowed_subpage_models()
 
     @classmethod
     def can_create_at(cls, parent):
@@ -1092,7 +1088,8 @@ class Page(AbstractPage, index.Indexed, ClusterableModel, metaclass=PageBase):
                     specific_dict[related_field.name] = values
 
         # New instance from prepared dict values, in case the instance class implements multiple levels inheritance
-        page_copy = self.specific_class(**specific_dict)
+        page_class = self.specific_class or Page
+        page_copy = page_class(**specific_dict)
 
         if not keep_live:
             page_copy.live = False
@@ -1462,7 +1459,8 @@ class PageRevision(models.Model):
             self.page.revisions.exclude(id=self.id).update(submitted_for_moderation=False)
 
     def as_page_object(self):
-        obj = self.page.specific_class.from_json(self.content_json)
+        page_class = self.page.specific_class
+        obj = page_class.from_json(self.content_json)
 
         # Override the possibly-outdated tree parameter fields from this revision object
         # with up-to-date values
@@ -1700,6 +1698,7 @@ class PagePermissionTester:
         self.user = user_perms.user
         self.user_perms = user_perms
         self.page = page
+        self.page_class = page.specific_class
         self.page_is_root = page.depth == 1  # Equivalent to page.is_root()
 
         if self.user.is_active and not self.user.is_superuser:
@@ -1711,8 +1710,7 @@ class PagePermissionTester:
     def can_add_subpage(self):
         if not self.user.is_active:
             return False
-        specific_class = self.page.specific_class
-        if specific_class is Page or not specific_class.creatable_subpage_models():
+        if self.page_class is None or not self.page_class.creatable_subpage_models():
             return False
         return self.user.is_superuser or ('add' in self.permissions)
 
@@ -1801,8 +1799,7 @@ class PagePermissionTester:
         """
         if not self.user.is_active:
             return False
-        specific_class = self.page.specific_class
-        if specific_class is Page or not specific_class.creatable_subpage_models():
+        if self.page_class is None or not self.page_class.creatable_subpage_models():
             return False
 
         return self.user.is_superuser or ('publish' in self.permissions)
@@ -1870,7 +1867,8 @@ class PagePermissionTester:
             return False
 
         # reject early if pages of this type cannot be created at the destination
-        if not self.page.specific_class.can_create_at(destination):
+        page_class = self.page.specific_class or Page
+        if not page_class.can_create_at(destination):
             return False
 
         # skip permission checking for super users
@@ -1880,7 +1878,8 @@ class PagePermissionTester:
         # Inspect permissions on the destination
         destination_perms = self.user_perms.for_page(destination)
 
-        if not destination.specific_class.creatable_subpage_models():
+        destination_class = destination.specific_class or Page
+        if not destination_class.creatable_subpage_models():
             return False
 
         # we always need at least add permission in the target
