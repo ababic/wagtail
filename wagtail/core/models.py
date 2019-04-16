@@ -595,7 +595,13 @@ class Page(AbstractPage, index.Indexed, ClusterableModel, metaclass=PageBase):
         most specific form
         """
         content_type = ContentType.objects.get_for_id(self.content_type_id)
-        return content_type.model_class()
+        model_class = content_type.model_class()
+        if model_class is None:
+            # Cannot locate a model class for this content type. This might
+            # happen if the page type model has been removed, but the stale
+            # content type has yet to be deleted.
+            return type(self)
+        return model_class
 
     def route(self, request, path_components):
         if path_components:
@@ -1706,7 +1712,7 @@ class PagePermissionTester:
         if not self.user.is_active:
             return False
         specific_class = self.page.specific_class
-        if specific_class is None or not specific_class.creatable_subpage_models():
+        if specific_class is Page or not specific_class.creatable_subpage_models():
             return False
         return self.user.is_superuser or ('add' in self.permissions)
 
@@ -1796,7 +1802,7 @@ class PagePermissionTester:
         if not self.user.is_active:
             return False
         specific_class = self.page.specific_class
-        if specific_class is None or not specific_class.creatable_subpage_models():
+        if specific_class is Page or not specific_class.creatable_subpage_models():
             return False
 
         return self.user.is_superuser or ('publish' in self.permissions)
