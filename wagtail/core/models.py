@@ -1696,7 +1696,6 @@ class PagePermissionTester:
         self.user = user_perms.user
         self.user_perms = user_perms
         self.page = page
-        self.page_class = page.specific_class
         self.page_is_root = page.depth == 1  # Equivalent to page.is_root()
 
         if self.user.is_active and not self.user.is_superuser:
@@ -1708,7 +1707,7 @@ class PagePermissionTester:
     def can_add_subpage(self):
         if not self.user.is_active:
             return False
-        if not self.page_class.creatable_subpage_models():
+        if not self.page.specific_class.creatable_subpage_models():
             return False
         return self.user.is_superuser or ('add' in self.permissions)
 
@@ -1797,7 +1796,7 @@ class PagePermissionTester:
         """
         if not self.user.is_active:
             return False
-        if not self.page_class.creatable_subpage_models():
+        if not self.page.specific_class.creatable_subpage_models():
             return False
 
         return self.user.is_superuser or ('publish' in self.permissions)
