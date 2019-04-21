@@ -587,12 +587,14 @@ class Page(AbstractPage, index.Indexed, ClusterableModel, metaclass=PageBase):
             return content_type.get_object_for_this_type(id=self.id)
 
     #: Return the class that this page would be if instantiated in its
-    #: most specific form
+    #: most specific form, or the just ``Page``` if the specific model
+    #: can no longer be derived from the page's content type.
     @cached_property
     def specific_class(self):
         """
         Return the class that this page would be if instantiated in its
-        most specific form
+        most specific form, or the just ``Page``` if the specific model
+        can no longer be derived from the page's content type.
         """
         content_type = ContentType.objects.get_for_id(self.content_type_id)
         return content_type.model_class() or type(self)
