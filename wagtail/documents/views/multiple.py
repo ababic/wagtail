@@ -1,7 +1,8 @@
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponseBadRequest, JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404
 from django.template.loader import render_to_string
+from django.template.response import TemplateResponse
 from django.utils.encoding import force_text
 from django.views.decorators.http import require_POST
 from django.views.decorators.vary import vary_on_headers
@@ -81,7 +82,7 @@ def add(request):
     else:
         form = DocumentForm(user=request.user)
 
-    return render(request, 'wagtaildocs/multiple/add.html', {
+    return TemplateResponse(request, 'wagtaildocs/multiple/add.html', {
         'help_text': form.fields['file'].help_text,
         'collections': collections_to_choose,
     })

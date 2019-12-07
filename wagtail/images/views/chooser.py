@@ -1,5 +1,6 @@
 from django.core.paginator import Paginator
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404
+from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.utils.translation import ugettext as _
 
@@ -108,7 +109,7 @@ def chooser(request):
         paginator = Paginator(images, per_page=12)
         images = paginator.get_page(request.GET.get('p'))
 
-        return render(request, "wagtailimages/chooser/results.html", {
+        return TemplateResponse(request, "wagtailimages/chooser/results.html", {
             'images': images,
             'is_searching': is_searching,
             'query_string': q,

@@ -4,7 +4,8 @@ from django.contrib.auth import views as auth_views
 from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.forms import PasswordChangeForm
 from django.http import Http404
-from django.shortcuts import redirect, render
+from django.shortcuts import redirect
+from django.template.response import TemplateResponse
 from django.urls import reverse, reverse_lazy
 from django.utils.translation import ugettext as _
 from django.utils.translation import activate
@@ -47,7 +48,7 @@ def account(request):
         if item:
             items.append(item)
 
-    return render(request, 'wagtailadmin/account/account.html', {
+    return TemplateResponse(request, 'wagtailadmin/account/account.html', {
         'items': items,
     })
 
@@ -73,7 +74,7 @@ def change_password(request):
     else:
         form = None
 
-    return render(request, 'wagtailadmin/account/change_password.html', {
+    return TemplateResponse(request, 'wagtailadmin/account/change_password.html', {
         'form': form,
         'can_change_password': can_change_password,
     })
@@ -90,7 +91,7 @@ def change_email(request):
     else:
         form = EmailForm(instance=request.user)
 
-    return render(request, 'wagtailadmin/account/change_email.html', {
+    return TemplateResponse(request, 'wagtailadmin/account/change_email.html', {
         'form': form,
     })
 
@@ -145,7 +146,7 @@ def notification_preferences(request):
     if not form.fields:
         return redirect('wagtailadmin_account')
 
-    return render(request, 'wagtailadmin/account/notification_preferences.html', {
+    return TemplateResponse(request, 'wagtailadmin/account/notification_preferences.html', {
         'form': form,
     })
 
@@ -164,7 +165,7 @@ def language_preferences(request):
     else:
         form = PreferredLanguageForm(instance=UserProfile.get_for_user(request.user))
 
-    return render(request, 'wagtailadmin/account/language_preferences.html', {
+    return TemplateResponse(request, 'wagtailadmin/account/language_preferences.html', {
         'form': form,
     })
 
@@ -180,7 +181,7 @@ def current_time_zone(request):
     else:
         form = CurrentTimeZoneForm(instance=UserProfile.get_for_user(request.user))
 
-    return render(request, 'wagtailadmin/account/current_time_zone.html', {
+    return TemplateResponse(request, 'wagtailadmin/account/current_time_zone.html', {
         'form': form,
     })
 
@@ -196,7 +197,7 @@ def change_avatar(request):
     else:
         form = AvatarPreferencesForm(instance=UserProfile.get_for_user(request.user))
 
-    return render(request, 'wagtailadmin/account/change_avatar.html', {'form': form})
+    return TemplateResponse(request, 'wagtailadmin/account/change_avatar.html', {'form': form})
 
 
 class LoginView(auth_views.LoginView):

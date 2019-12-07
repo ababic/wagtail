@@ -2,7 +2,8 @@ import os
 
 from django.core.paginator import Paginator
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import get_object_or_404, redirect
+from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.urls.exceptions import NoReverseMatch
 from django.utils.translation import ugettext as _
@@ -68,13 +69,13 @@ def index(request):
 
     # Create response
     if request.is_ajax():
-        return render(request, 'wagtailimages/images/results.html', {
+        return TemplateResponse(request, 'wagtailimages/images/results.html', {
             'images': images,
             'query_string': query_string,
             'is_searching': bool(query_string),
         })
     else:
-        return render(request, 'wagtailimages/images/index.html', {
+        return TemplateResponse(request, 'wagtailimages/images/index.html', {
             'images': images,
             'query_string': query_string,
             'is_searching': bool(query_string),
@@ -152,7 +153,7 @@ def edit(request, image_id):
     except SourceImageIOError:
         filesize = None
 
-    return render(request, "wagtailimages/images/edit.html", {
+    return TemplateResponse(request, "wagtailimages/images/edit.html", {
         'image': image,
         'form': form,
         'url_generator_enabled': url_generator_enabled,
@@ -175,7 +176,7 @@ def url_generator(request, image_id):
         'height': image.height,
     })
 
-    return render(request, "wagtailimages/images/url_generator.html", {
+    return TemplateResponse(request, "wagtailimages/images/url_generator.html", {
         'image': image,
         'form': form,
     })
@@ -247,7 +248,7 @@ def delete(request, image_id):
         messages.success(request, _("Image '{0}' deleted.").format(image.title))
         return redirect('wagtailimages:index')
 
-    return render(request, "wagtailimages/images/confirm_delete.html", {
+    return TemplateResponse(request, "wagtailimages/images/confirm_delete.html", {
         'image': image,
         'uses': uses,
     })
@@ -284,6 +285,6 @@ def add(request):
     else:
         form = ImageForm(user=request.user)
 
-    return render(request, "wagtailimages/images/add.html", {
+    return TemplateResponse(request, "wagtailimages/images/add.html", {
         'form': form,
     })
