@@ -2,7 +2,8 @@ from django.contrib.auth.views import redirect_to_login as auth_redirect_to_logi
 from django.core.exceptions import PermissionDenied
 from django.urls import reverse
 from django.utils.timezone import activate as activate_tz
-from django.utils.translation import override, ugettext as _
+from django.utils.translation import ugettext as _
+from django.utils.translation import override
 
 from wagtail.admin import messages
 from wagtail.utils import l18n
