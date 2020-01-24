@@ -2,9 +2,43 @@ import operator
 from functools import reduce
 
 from django.contrib.admin.utils import lookup_needs_distinct
-from django.db.models import Q
+from django.db.models import QuerySet, Q
 
 from wagtail.search.backends import get_search_backend
+from wagtail.search.backends.base import FilterFieldError
+
+
+def clear_queryset_ordering(queryset: QuerySet) -> QuerySet:
+    obj = queryset._clone()
+    obj.query.clear_ordering(True)
+    return obj
+
+
+def clear_queryset_filters(queryset: QuerySet) -> QuerySet:
+    obj = queryset._clone()
+    obj.query.where = obj.query.where_class()
+    return obj
+
+
+def simplify_queryset_filters(queryset: QuerySet) -> QuerySet:
+    """
+    Returns an equivalent queryset with any 'where' clauses replaced
+    with a single, simple filter which identifies the same rows by
+    their primary key, and is far less likely to result in
+    ``FilterFieldError`` being raised when passed to the ``search()``
+    search method of a Wagtail search backend (provided the pk
+    field has been added to the model's ``search_fields`` list using
+    ``index.FilterField('field_name')``).
+
+    Requires an additional database query to identify the primary
+    key values, which has a clear negative impact on performance.
+    """
+    # avoid unnecessary work if query isn't filtered
+    if not queryset.query.where:
+        return queryset
+    # return new queryset with filters replaced
+    new_queryset = clear_queryset_filters(queryset)
+    return new_queryset.filter(pk__in=queryset.values_list('pk', flat=True))
 
 
 class BaseSearchHandler:
@@ -44,7 +78,6 @@ class DjangoORMSearchHandler(BaseSearchHandler):
                 return queryset.distinct()
         return queryset
 
-
     @property
     def show_search_form(self):
         return bool(self.search_fields)
@@ -56,43 +89,36 @@ class WagtailBackendSearchHandler(BaseSearchHandler):
 
     def search_queryset(
         self, queryset, search_term, preserve_order=False, operator=None,
-        partial_match=True, backend=None, **kwargs
+        partial_match=True, backend=None, simplify_filters=None, **kwargs
     ):
         if not search_term:
             return queryset
 
+        if not preserve_order:
+            # Reduce likelihood of unnecessary OrderByFieldErrors
+            queryset = clear_queryset_ordering(queryset)
+
         backend = get_search_backend(backend or self.default_search_backend)
-        return backend.search(
-            search_term,
-            queryset,
-            fields=self.search_fields or None,
-            operator=operator,
-            partial_match=partial_match,
-            order_by_relevance=not preserve_order,
-        )
 
-
-class FilterSimplifyingWagtailBackendSearchHandler(WagtailBackendSearchHandler):
-    """
-    A search handler that evaluates the supplied queryset, and passes a new
-    queryset to the underlying search backend, which is filtered only by the
-    model's primary key, but maintains preferences set by annotate(),
-    order_by(), select_related() and prefetch_related().
-    """
-
-    @staticmethod
-    def replace_filters_with_pk_filter(queryset):
-        # create new QuerySet
-        obj = queryset._clone()
-        # nullify any existing filters/exclusions
-        obj.query.where = obj.query.where_class()
-        # filter the new QuerySet by ids instead
-        obj = obj.model._default_manager.filter(pk__in=queryset.values_list('pk', flat=True))
-        return obj
-
-    def search_queryset(
-        self, queryset, search_term, preserve_order=False, operator=None,
-        partial_match=True, backend=None, **kwargs
-    ):
-        queryset = self.replace_filters_with_pk_filter(queryset)
-        return super().search_queryset(queryset, search_term, preserve_order=preserve_order, operator=operator, partial_match=partial_match, backend=backend, **kwargs)
+        try:
+            return backend.search(
+                search_term,
+                queryset,
+                fields=self.search_fields or None,
+                operator=operator,
+                partial_match=partial_match,
+                order_by_relevance=not preserve_order,
+            )
+        except FilterFieldError:
+            if simplify_filters is None:
+                simplify_filters = self.default_simplify_fitlers
+            if simplify_filters:
+                return backend.search(
+                    search_term,
+                    simplify_queryset_filters(queryset),
+                    fields=self.search_fields or None,
+                    operator=operator,
+                    partial_match=partial_match,
+                    order_by_relevance=not preserve_order,
+                )
+            raise
