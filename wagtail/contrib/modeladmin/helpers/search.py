@@ -70,3 +70,29 @@ class WagtailBackendSearchHandler(BaseSearchHandler):
             partial_match=partial_match,
             order_by_relevance=not preserve_order,
         )
+
+
+class FilterSimplifyingWagtailBackendSearchHandler(WagtailBackendSearchHandler):
+    """
+    A search handler that evaluates the supplied queryset, and passes a new
+    queryset to the underlying search backend, which is filtered only by the
+    model's primary key, but maintains preferences set by annotate(),
+    order_by(), select_related() and prefetch_related().
+    """
+
+    @staticmethod
+    def replace_filters_with_pk_filter(queryset):
+        # create new QuerySet
+        obj = queryset._clone()
+        # nullify any existing filters/exclusions
+        obj.query.where = obj.query.where_class()
+        # filter the new QuerySet by ids instead
+        obj = obj.model._default_manager.filter(pk__in=queryset.values_list('pk', flat=True))
+        return obj
+
+    def search_queryset(
+        self, queryset, search_term, preserve_order=False, operator=None,
+        partial_match=True, backend=None, **kwargs
+    ):
+        queryset = self.replace_filters_with_pk_filter(queryset)
+        return super().search_queryset(queryset, search_term, preserve_order=preserve_order, operator=operator, partial_match=partial_match, backend=backend, **kwargs)
