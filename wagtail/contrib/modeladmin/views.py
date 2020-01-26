@@ -500,6 +500,9 @@ class IndexView(WMABaseView):
         return ordering_fields
 
     def get_queryset(self, request=None):
+        if hasattr(self, 'queryset'):
+            return self.queryset
+
         request = request or self.request
 
         # First, we collect all the declared list filters.
