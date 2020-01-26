@@ -89,11 +89,10 @@ class DjangoORMSearchHandler(BaseSearchHandler):
 class WagtailBackendSearchHandler(BaseSearchHandler):
 
     default_search_backend = 'default'
-    default_simplify_fitlers = False
 
     def search_queryset(
         self, queryset, search_term, preserve_order=False, operator=None,
-        partial_match=True, backend=None, simplify_filters=None, **kwargs
+        partial_match=True, backend=None, **kwargs
     ):
         if not search_term:
             return queryset
@@ -114,18 +113,14 @@ class WagtailBackendSearchHandler(BaseSearchHandler):
                 order_by_relevance=not preserve_order,
             )
         except FilterFieldError:
-            if simplify_filters is None:
-                simplify_filters = self.default_simplify_fitlers
-            if simplify_filters:
-                return backend.search(
-                    search_term,
-                    simplify_queryset_filters(queryset),
-                    fields=self.search_fields or None,
-                    operator=operator,
-                    partial_match=partial_match,
-                    order_by_relevance=not preserve_order,
-                )
-            raise
+            return backend.search(
+                search_term,
+                simplify_queryset_filters(queryset),
+                fields=self.search_fields or None,
+                operator=operator,
+                partial_match=partial_match,
+                order_by_relevance=not preserve_order,
+            )
 
     def ordering_supported(self, field_name, model):
         """
