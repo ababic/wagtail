@@ -60,6 +60,9 @@ class BaseSearchHandler:
         """
         return True
 
+    def ordering_supported(self, field_name, model):
+        raise True
+
 
 class DjangoORMSearchHandler(BaseSearchHandler):
     def search_queryset(self, queryset, search_term, **kwargs):
@@ -86,6 +89,7 @@ class DjangoORMSearchHandler(BaseSearchHandler):
 class WagtailBackendSearchHandler(BaseSearchHandler):
 
     default_search_backend = 'default'
+    default_simplify_fitlers = False
 
     def search_queryset(
         self, queryset, search_term, preserve_order=False, operator=None,
@@ -122,3 +126,20 @@ class WagtailBackendSearchHandler(BaseSearchHandler):
                     order_by_relevance=not preserve_order,
                 )
             raise
+
+    def ordering_supported(self, field_name, model):
+        """
+        Overrides ``BaseSearchHandler.is_ordering_supported()`` to prevent
+        column ordering in ``IndexView`` for fields that not included in
+        the model's ``search_fields`` list, reducing the likelihood of
+        ``OrderByFieldError`` being raised.
+        """
+        if not field_name:
+            return False
+
+        # cache value on model for faster repeat calls
+        if not hasattr(model, '_filterable_field_names'):
+            model._filterable_field_names = tuple(
+                f.field_name for f in model.get_filterable_search_fields()
+            )
+        return field_name in model._filterable_field_names

@@ -221,10 +221,6 @@ class IndexView(WMABaseView):
     ERROR_FLAG = 'e'
     IGNORED_PARAMS = (ORDER_VAR, ORDER_TYPE_VAR, SEARCH_VAR)
 
-    # sortable_by is required by the django.contrib.admin.templatetags.admin_list.result_headers
-    # template tag as of Django 2.1 - see https://docs.djangoproject.com/en/2.1/ref/contrib/admin/#django.contrib.admin.ModelAdmin.sortable_by
-    sortable_by = None
-
     @method_decorator(login_required)
     def dispatch(self, request, *args, **kwargs):
         # Only continue if logged in user has list permission
@@ -261,6 +257,30 @@ class IndexView(WMABaseView):
             css={'all': self.model_admin.get_index_view_extra_css()},
             js=self.model_admin.get_index_view_extra_js()
         )
+
+    def get_sortable_by(self):
+        """
+        Returns the names of columns that should be allowed to have sortable
+        headers, or ``None`` to indicate there should be no restrictions other
+        than that the column can be matched to a model field. The value is read
+        by ``django.contrib.admin.templatetags.admin_list.result_headers``.
+
+        In Wagtail, ordering by some columns can trigger errors if the
+        ``WagtailBackendSearchHandler`` is being used and relevant model fields
+        have not been added to ``search_fields``. So, when searching, we allow
+        the search handler to have a say in which columns should appear as
+        sortable.
+        """
+        if not self.query:
+            return
+
+        col_order_fields = {col: self.get_ordering_field(col) for col in self.list_display}
+        return tuple(
+            col for col, order_field in col_order_fields.items()
+            if order_field and self.search_handler.ordering_supported(order_field, self.model)
+        )
+
+    sortable_by = cached_property(get_sortable_by, name='sortable_by')
 
     def get_buttons_for_obj(self, obj):
         return self.button_helper.get_buttons_for_obj(
