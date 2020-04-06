@@ -1,6 +1,7 @@
 from weakref import WeakKeyDictionary
 
 import jinja2
+from django.http import HttpRequest
 from django.utils.encoding import force_str
 from jinja2.ext import Extension
 
@@ -15,25 +16,27 @@ settings_cache = WeakKeyDictionary()
 
 class ContextCache(dict):
     """
-    A cache of Sites and their Settings for a template Context
+    A cache of SiteSettingsCache objects keyed by HttpRequest or Site
     """
-    def __missing__(self, key):
+    def __missing__(self, request_or_site):
         """
-        Make a SiteSetting for a new Site
+        When settings for a new request or site are requested,
+        create, cache and return a new SiteSettingsCache
         """
-        if not(isinstance(key, Site)):
+        if not(isinstance(request_or_site, (HttpRequest, Site))):
             raise TypeError
-        out = self[key] = SiteSettings(key)
-        return out
+        self[request_or_site] = obj = SiteSettingsCache(request_or_site)
+        return obj
 
 
-class SiteSettings(dict):
+class SiteSettingsCache(dict):
     """
-    A cache of Settings for a specific Site
+    A cache of Settings objects for a specific HttpRequest or Site,
+    keyed by 'app_label.Model' style strings.
     """
-    def __init__(self, site):
+    def __init__(self, request_or_site):
         super().__init__()
-        self.site = site
+        self.request_or_site = request_or_site
 
     def __getitem__(self, key):
         # Normalise all keys to lowercase
@@ -41,7 +44,8 @@ class SiteSettings(dict):
 
     def __missing__(self, key):
         """
-        Get the settings instance for this site, and store it for later
+        When new settings are requested for a request or site,
+        fetch, cache and return the relevant object.
         """
         try:
             app_label, model_name = key.split('.', 1)
@@ -51,28 +55,31 @@ class SiteSettings(dict):
         if Model is None:
             raise KeyError('Unknown setting: {}'.format(key))
 
-        out = self[key] = Model.for_site(self.site)
-        return out
+        if isinstance(self.request_or_site, Site):
+            obj = Model.for_site(self.request_or_site)
+        else:
+            obj = Model.for_request(self.request_or_site)
+        self[key] = obj
+        return obj
 
 
 @jinja2.contextfunction
 def get_setting(context, model_string, use_default_site=False):
     if use_default_site:
-        site = Site.objects.get(is_default_site=True)
+        request_or_site = Site.objects.get(is_default_site=True)
     elif 'request' in context:
-        site = Site.find_for_request(context['request'])
+        request_or_site = context['request']
     else:
         raise RuntimeError('No request found in context, and use_default_site '
                            'flag not set')
 
-    # Sadly, WeakKeyDictionary can not implement __missing__, so we have to do
-    # this one manually
+    # WeakKeyDictionary does not support __missing__, so we create
+    # a ContextCache below if one does not already exist
     try:
         context_cache = settings_cache[context]
     except KeyError:
         context_cache = settings_cache[context] = ContextCache()
-    # These ones all implement __missing__ in a useful way though
-    return context_cache[site][model_string]
+    return context_cache[request_or_site][model_string]
 
 
 class SettingsExtension(Extension):
