@@ -366,6 +366,7 @@ class Page(AbstractPage, index.Indexed, ClusterableModel, metaclass=PageBase):
         index.AutocompleteField('title'),
         index.FilterField('title'),
         index.FilterField('id'),
+        index.FilterField('uuid'),
         index.FilterField('live'),
         index.FilterField('owner'),
         index.FilterField('content_type'),
@@ -1168,7 +1169,7 @@ class Page(AbstractPage, index.Indexed, ClusterableModel, metaclass=PageBase):
     def copy(self, recursive=False, to=None, update_attrs=None, copy_revisions=True, keep_live=True, user=None, process_child_object=None, exclude_fields=None):
         # Fill dict with self.specific values
         specific_self = self.specific
-        default_exclude_fields = ['id', 'path', 'depth', 'numchild', 'url_path', 'path', 'index_entries']
+        default_exclude_fields = ['id', 'uuid', 'path', 'depth', 'numchild', 'url_path', 'path', 'index_entries']
         exclude_fields = default_exclude_fields + specific_self.exclude_fields_in_copy + (exclude_fields or [])
         specific_dict = {}
 
@@ -1593,9 +1594,9 @@ class Page(AbstractPage, index.Indexed, ClusterableModel, metaclass=PageBase):
         page revision).
 
         Certain field values are preserved in order to prevent errors if the returned
-        page is saved, such as ``id``, ``content_type`` and some tree-related values.
-        The following field values are also preserved, as they are considered to be
-        meaningful to the page as a whole, rather than to a specific revision:
+        page is saved, such as ``id``, ``uuid``, ``content_type`` and some tree-related
+        values. The following field values are also preserved, as they are considered to
+        be meaningful to the page as a whole, rather than to a specific revision:
 
         * ``draft_title``
         * ``live``
@@ -1612,6 +1613,7 @@ class Page(AbstractPage, index.Indexed, ClusterableModel, metaclass=PageBase):
 
         # These should definitely never change between revisions
         obj.pk = self.pk
+        obj.uuid = self.uuid
         obj.content_type = self.content_type
 
         # Override possibly-outdated tree parameter fields
