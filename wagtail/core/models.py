@@ -1,5 +1,7 @@
 import json
 import logging
+import uuid
+
 from collections import defaultdict
 from io import StringIO
 from urllib.parse import urlparse
@@ -250,6 +252,11 @@ class AbstractPage(MP_Node):
 
 
 class Page(AbstractPage, index.Indexed, ClusterableModel, metaclass=PageBase):
+    uuid = models.UUIDField(
+        default=uuid.uuid4,
+        editable=False,
+        unique=True,
+    )
     title = models.CharField(
         verbose_name=_('title'),
         max_length=255,
