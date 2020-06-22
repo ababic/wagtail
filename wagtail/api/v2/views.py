@@ -1,12 +1,12 @@
 from collections import OrderedDict
 
-from django.conf.urls import url
 from django.core.exceptions import FieldDoesNotExist
 from django.http import Http404
 from django.shortcuts import redirect
-from django.urls import reverse
+from django.urls import path, reverse
 from modelcluster.fields import ParentalKey
 from rest_framework import status
+from rest_framework.generics import get_object_or_404
 from rest_framework.renderers import BrowsableAPIRenderer, JSONRenderer
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
@@ -44,10 +44,10 @@ class BaseAPIViewSet(GenericViewSet):
         # Required by BrowsableAPIRenderer
         'format',
     ])
-    body_fields = ['id']
+    body_fields = ['id', 'uuid']
     meta_fields = ['type', 'detail_url']
-    listing_default_fields = ['id', 'type', 'detail_url']
-    nested_default_fields = ['id', 'type', 'detail_url']
+    listing_default_fields = ['id', 'uuid', 'type', 'detail_url']
+    nested_default_fields = ['id', 'uuid', 'type', 'detail_url']
     detail_only_fields = []
     name = None  # Set on subclass.
 
@@ -71,7 +71,7 @@ class BaseAPIViewSet(GenericViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return self.get_paginated_response(serializer.data)
 
-    def detail_view(self, request, pk):
+    def detail_view(self, request, pk=None, uuid=None):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
@@ -336,9 +336,10 @@ class BaseAPIViewSet(GenericViewSet):
         This returns a list of URL patterns for the endpoint
         """
         return [
-            url(r'^$', cls.as_view({'get': 'listing_view'}), name='listing'),
-            url(r'^(?P<pk>\d+)/$', cls.as_view({'get': 'detail_view'}), name='detail'),
-            url(r'^find/$', cls.as_view({'get': 'find_view'}), name='find'),
+            path('', cls.as_view({'get': 'listing_view'}), name='listing'),
+            path('<int:pk>/', cls.as_view({'get': 'detail_view'}), name='detail'),
+            path('<uuid:uuid>/', cls.as_view({'get': 'detail_view'}), name='detail_with_uuid'),
+            path('find/', cls.as_view({'get': 'find_view'}), name='find'),
         ]
 
     @classmethod
@@ -446,8 +447,24 @@ class PagesAPIViewSet(BaseAPIViewSet):
             return filter_page_type(self.get_base_queryset(), models)
 
     def get_object(self):
-        base = super().get_object()
-        return base.specific
+        filter_kwargs = {}
+        for lookup_field in ('uuid', 'pk'):
+            if lookup_field in self.kwargs:
+                filter_kwargs = {lookup_field: self.kwargs[lookup_field]}
+                break
+
+        assert filter_kwargs, (
+            'Expected view %s to be called with a URL keyword argument '
+            'named "uuid" or "pk", but neither was present.' % self.__class__.__name__
+        )
+
+        queryset = self.filter_queryset(self.get_queryset())
+        obj = get_object_or_404(queryset, **filter_kwargs)
+
+        # May raise a permission denied
+        self.check_object_permissions(self.request, obj)
+
+        return obj.specific
 
     def find_object(self, queryset, request):
         site = Site.find_for_request(request)
