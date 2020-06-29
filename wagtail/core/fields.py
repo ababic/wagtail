@@ -1,6 +1,7 @@
 import json
 from html import unescape
 
+from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.utils.encoding import force_str
@@ -69,8 +70,11 @@ class StreamField(models.Field):
 
     def deconstruct(self):
         name, path, _, kwargs = super().deconstruct()
-        block_types = list(self.stream_block.child_blocks.items())
-        args = [block_types]
+        if getattr(settings, 'WAGTAIL_INCLUDE_STREAMBLOCK_DEFINITIONS_IN_MIGRATIONS', True):
+            block_types = list(self.stream_block.child_blocks.items())
+            args = [block_types]
+        else:
+            args = []
         return name, path, args, kwargs
 
     def to_python(self, value):
