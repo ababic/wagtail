@@ -1,3 +1,4 @@
+import functools
 import json
 import logging
 from collections import defaultdict
@@ -14,7 +15,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.handlers.base import BaseHandler
 from django.core.handlers.wsgi import WSGIRequest
 from django.db import models, transaction
-from django.db.models import Q, Value
+from django.db.models import DEFERRED, OneToOneRel, Q, Value
 from django.db.models.expressions import OuterRef, Subquery
 from django.db.models.functions import Concat, Lower, Substr
 from django.http import Http404
@@ -34,6 +35,7 @@ from modelcluster.fields import ParentalKey, ParentalManyToManyField
 from modelcluster.models import ClusterableModel, get_all_child_relations
 from treebeard.mp_tree import MP_Node
 
+from wagtail.core.fields import RichTextField, StreamField
 from wagtail.core.forms import TaskStateCommentForm
 from wagtail.core.query import PageQuerySet, TreeQuerySet
 from wagtail.core.signals import (
@@ -339,6 +341,42 @@ def get_default_page_content_type():
     has been deleted.
     """
     return ContentType.objects.get_for_model(Page)
+
+
+@functools.lru_cache(maxsize=None)
+def get_large_field_names(model_class):
+    return tuple(
+        field.name for field in model_class._meta.concrete_fields
+        if isinstance(field, (RichTextField, StreamField))
+    )
+
+
+@functools.lru_cache(maxsize=None)
+def get_concrete_subclasses(model_class):
+    return tuple(
+        model for model in get_page_models()
+        if issubclass(model, model_class)
+    )
+
+
+@functools.lru_cache(maxsize=None)
+def get_concrete_subclass_related_names(model_class):
+    subclasses = get_concrete_subclasses(model_class)
+    values = {}
+
+    def gather_related_names(model_class, prefix=None):
+        for rel in model_class._meta.related_objects:
+            if (
+                isinstance(rel, OneToOneRel)
+                and rel.related_model in subclasses
+                and rel.related_model not in values
+            ):
+                rel_name = f'{prefix}__{rel.name}' if prefix else rel.name
+                values[rel.related_model] = rel_name
+                gather_related_names(rel.related_model, prefix=rel_name)
+
+    gather_related_names(model_class)
+    return values
 
 
 class BasePageManager(models.Manager):
@@ -791,6 +829,25 @@ class Page(MultiTableCopyMixin, AbstractPage, index.Indexed, ClusterableModel, m
             )
         )
 
+    @classmethod
+    def concrete_subclasses(cls):
+        """
+        Returns a tuple of direct and indirect (non-abstract) subclasses of
+        this page type. Used by PageQuerySet.specific().
+        """
+        return get_concrete_subclasses(cls)
+
+    @classmethod
+    def concrete_subclass_related_names(cls):
+        return get_concrete_subclass_related_names(cls)
+
+    @classmethod
+    def large_field_names(cls, prefix=None):
+        return tuple(
+            name if not prefix else prefix + '__' + name
+            for name in get_large_field_names(cls)
+        )
+
     @cached_property
     def specific(self):
         """
@@ -819,6 +876,34 @@ class Page(MultiTableCopyMixin, AbstractPage, index.Indexed, ClusterableModel, m
             # self is already the an instance of the most specific class
             return self
         return self.cached_content_type.get_object_for_this_type(id=self.id)
+
+    @cached_property
+    def specific_deferred(self):
+        """
+        Similar to ``specific``, but does not trigger a database query to
+        fetch any specific field values from the database. This makes this
+        method much more efficient, but also means that accessing any custom
+        field values from the returned object will result in additional
+        queries to fetch the field value (an individual query for each field
+        accessed).
+
+        If you need to access to specific field values, use ``specific``
+        instead.
+        """
+        model_class = self.specific_class
+
+        if model_class is None or isinstance(self, model_class):
+            return self
+
+        # generate a tuple of values in the order expected by __init__(),
+        # with missing values substituted with DEFERRED
+        values = tuple(
+            getattr(self, f.attname, self.pk if f.primary_key else DEFERRED)
+            for f in model_class._meta.concrete_fields
+        )
+        obj = model_class(*values)
+        obj._state.adding = False
+        return obj
 
     @cached_property
     def specific_class(self):
