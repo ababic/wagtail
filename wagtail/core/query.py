@@ -2,11 +2,11 @@ import posixpath
 import warnings
 from collections import defaultdict
 
-from django.apps import apps
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import CharField, Q
 from django.db.models.functions import Length, Substr
-from django.db.models.query import BaseIterable
+from django.db.models.query import BaseIterable, ModelIterable
 from treebeard.mp_tree import MP_NodeQuerySet
 
 from wagtail.search.queryset import SearchableQuerySetMixin
@@ -134,6 +134,44 @@ class TreeQuerySet(MP_NodeQuerySet):
 
 
 class PageQuerySet(SearchableQuerySetMixin, TreeQuerySet):
+    def __init__(self, *args, **kwargs):
+        """Adds custom attributes to queryset instances to help
+        support efficient upcasting."""
+        super().__init__(*args, **kwargs)
+        self._iterable_class = PageIterable
+        self._upcast_lookups = None
+        # managed by generic() or specific()
+        self._apply_upcasting = False
+        # set by specific()
+        self._deferred_upcasting = False
+        # set by defer_large_fields()
+        self._defer_large_fields = False
+        # set by type(), exact_type() or page()
+        self._specified_models = set()
+        # set by not_type() or not_exact_type()
+        self._excluded_models = set()
+
+    def _clone(self):
+        """Ensure clones inherit custom attribute values from
+        the original."""
+        clone = super()._clone()
+        # these attributes are fine to retain the same value
+        for attr in (
+            "_apply_upcasting",
+            "_deferred_upcasting",
+            "_defer_large_fields",
+            "_upcast_lookups",
+        ):
+            setattr(clone, attr, getattr(self, attr))
+        # these values must be copied in order to avoid unwanted
+        # value contamination between potential sub-querysets
+        for attr in (
+            "_specified_models",
+            "_excluded_models",
+        ):
+            setattr(clone, attr, set(getattr(self, attr)))
+        return clone
+
     def live_q(self):
         return Q(live=True)
 
@@ -171,6 +209,7 @@ class PageQuerySet(SearchableQuerySetMixin, TreeQuerySet):
         """
         This filters the QuerySet so it only contains the specified page.
         """
+        self._specified_models = {other.specific_class}
         return self.filter(self.page_q(other))
 
     def not_page(self, other):
@@ -179,43 +218,51 @@ class PageQuerySet(SearchableQuerySetMixin, TreeQuerySet):
         """
         return self.exclude(self.page_q(other))
 
-    def type_q(self, klass):
-        content_types = ContentType.objects.get_for_models(*[
-            model for model in apps.get_models()
-            if issubclass(model, klass)
-        ]).values()
+    def type_q(self, *models, excluding=False):
+        model_set = set()
+        for model in models:
+            model_set.update(model.concrete_subclasses())
+        if excluding:
+            self._excluded_models.update(model_set)
+        else:
+            self._specified_models = model_set
+        content_types = tuple(ContentType.objects.get_for_models(*model_set).values())
+        return Q(content_type__in=content_types)
 
-        return Q(content_type__in=list(content_types))
-
-    def type(self, model):
+    def type(self, *models):
         """
         This filters the QuerySet to only contain pages that are an instance
         of the specified model (including subclasses).
         """
-        return self.filter(self.type_q(model))
+        return self.filter(self.type_q(*models, excluding=False))
 
-    def not_type(self, model):
+    def not_type(self, *models):
         """
         This filters the QuerySet to not contain any pages which are an instance of the specified model.
         """
-        return self.exclude(self.type_q(model))
+        return self.exclude(self.type_q(*models, excluding=True))
 
-    def exact_type_q(self, klass):
-        return Q(content_type=ContentType.objects.get_for_model(klass))
+    def exact_type_q(self, *models, excluding=False):
+        if excluding:
+            self._excluded_models.update(models)
+        else:
+            self._specified_models = set(models)
+        content_types = ContentType.objects.get_for_models(*models)
+        return Q(content_type__in=list(content_types.values()))
 
-    def exact_type(self, model):
+    def exact_type(self, *models):
         """
         This filters the QuerySet to only contain pages that are an instance of the specified model
         (matching the model exactly, not subclasses).
         """
-        return self.filter(self.exact_type_q(model))
+        return self.filter(self.exact_type_q(*models, excluding=False))
 
-    def not_exact_type(self, model):
+    def not_exact_type(self, *models):
         """
         This filters the QuerySet to not contain any pages which are an instance of the specified model
         (matching the model exactly, not subclasses).
         """
-        return self.exclude(self.exact_type_q(model))
+        return self.exclude(self.exact_type_q(*models, excluding=True))
 
     def public_q(self):
         from wagtail.core.models import PageViewRestriction
@@ -343,6 +390,18 @@ class PageQuerySet(SearchableQuerySetMixin, TreeQuerySet):
         for page in self.live():
             page.unpublish()
 
+    def defer_large_fields(self):
+        """
+        Apply to a queryset to defer fetching of 'large' fields when the
+        queryset is evaluated. This includes all instances of
+        ``wagtail.core.fields.RichTextField`` or
+        ``wagtail.core.fields.StreamField`` on the base model, and (if used in
+        combination with ``specific_new()``) all of the specific subclasses.
+        """
+        clone = self._clone()
+        clone._defer_large_fields = True
+        return clone
+
     def specific(self, defer=False):
         """
         This efficiently gets all the specific pages for the queryset, using
@@ -360,11 +419,199 @@ class PageQuerySet(SearchableQuerySetMixin, TreeQuerySet):
             clone._iterable_class = SpecificIterable
         return clone
 
+    def specific_new(self, defer=False):
+        """
+        Apply to a queryset to make it return specific page instances when
+        evaluated.
+
+        Call with ``defer=True`` to defer fetching of any field data from
+        more specific page models. This will improve query efficiency by
+        reducing the number of database joins required. However, returned
+        objects will not have immediate access to any custom field values.
+        If you intend to do anything that requires access to custom fields
+        values (even indirectly, by calling custom / overridden model
+        methods), additional per-instance queries will be triggered to fetch
+        each value individually, easily negating any advantages.
+        """
+        clone = self._clone()
+        clone._apply_upcasting = True
+        if defer is True:
+            clone._deferred_upcasting = True
+        return clone
+
     def in_site(self, site):
         """
         This filters the QuerySet to only contain pages within the specified site.
         """
         return self.descendant_of(site.root_page, inclusive=True)
+
+    def get_used_models(self):
+        for ct in ContentType.objects.filter(pages__id__in=self.values_list('id', flat=True)):
+            model = ct.model_class()
+            if model is not None:
+                model._content_type = ct
+                yield model
+
+    def _get_upcast_models(self):
+        """
+        Return a set of model classes that pages in the current queryset result
+        are likely to be instances of.
+        """
+        if self._specified_models:
+            models = self._specified_models
+        else:
+            potential_subclasses = self.model.concrete_subclasses()
+            if self._deferred_upcasting or len(potential_subclasses) < 15:
+                models = set(potential_subclasses)
+            else:
+                models = set(self.get_used_models())
+        return models - self._excluded_models
+
+    def _get_upcast_lookups(self):
+        """
+        Return a dictionary of model class / related_name pairs (tuples),
+        keyed by the id of the model class's related ``ContentType``.
+
+        The 'related_name' is the name of the one-to-one relationship that
+        can be used in ``select_related()`` to fetch the most specific page
+        instance data (e.g. "eventpage").
+
+        ``ContentType`` ids are used as keys to make looking up the correct
+        upcast details for each page as efficient as possible in
+        ``PageIterable.__iter__()``.
+        """
+        lookups = {}
+
+        if not self._apply_upcasting:
+            return lookups
+
+        related_names = self.model.concrete_subclass_related_names()
+
+        for model in self._get_upcast_models():
+            related_name = related_names.get(model)
+            if related_name is None:
+                # This wouldn't result in an 'upcast', so ignore
+                continue
+            # Use a cached ContentType value or look it up
+            if not hasattr(model, "_content_type"):
+                model._content_type = ContentType.objects.get_for_model(model)
+            lookups[model._content_type.id] = (model, related_name)
+        return lookups
+
+    def _apply_upcast_lookups(self):
+        if self._upcast_lookups is None:
+            self._upcast_lookups = self._get_upcast_lookups()
+
+        if not self._upcast_lookups or self._deferred_upcasting:
+            # No need to apply 'select_related'
+            return self
+
+        # Use select_related() to fetch subclass model data
+        # while retaining existing 'select_related' values
+        previous_select_related = self.query.select_related
+        related_names = tuple(
+            rel_name for model, rel_name in self._upcast_lookups.values()
+        )
+        qs = self.select_related(*related_names)
+        if isinstance(previous_select_related, dict):
+            qs.query.select_related.update(previous_select_related)
+        return qs
+
+    def _apply_defer_large_fields(self):
+        if not self._defer_large_fields:
+            # Return unchanged if undesirable
+            return self
+
+        # Start with a list of base model field names
+        field_names = list(self.model.large_field_names())
+
+        # Add large field names for subclasses too
+        if self._upcast_lookups and not self._deferred_upcasting:
+            for model, related_name in self._upcast_lookups.values():
+                field_names.extend(model.large_field_names(prefix=related_name))
+
+        if not field_names:
+            return self
+
+        # Defer collected fields
+        return self.defer(*field_names)
+
+
+class PageIterable(ModelIterable):
+    def __iter__(self):
+        self.queryset = (
+            self.queryset._apply_upcast_lookups()._apply_defer_large_fields()
+        )
+        upcast_lookups = self.queryset._upcast_lookups
+
+        if upcast_lookups and not self.queryset._prefetch_related_lookups:
+            # when prefetch_related() has not been used, use iterator()
+            # to prevent unnecessary result caching
+
+            # switch iterator class to avoid infinite recursion
+            self.queryset._iterable_class = ModelIterable
+            iterator = self.queryset.iterator()
+        else:
+            # use standard ModelIterable behaviour
+            iterator = super().__iter__()
+
+        if upcast_lookups:
+            for obj in iterator:
+                upcast_info = self.queryset._upcast_lookups.get(obj.content_type_id)
+                if upcast_info is not None:
+                    yield self.upcast(obj, *upcast_info)
+                else:
+                    yield obj
+                    if obj.specific_class is not self.queryset.model:
+                        warnings.warn(
+                            "The specific version of the following page could not be "
+                            "returned, because its model class could not be found "
+                            "in the codebase: <Page id:{} title:'{}' url_path:'{}'>"
+                            .format(obj.id, obj.title, obj.url_path),
+                            category=RuntimeWarning, stacklevel=2
+                        )
+        else:
+            yield from iterator
+
+    def upcast(self, obj, target_class, rel_name):
+        """
+        'Upcast' a Page object to its most specific type, ensuring on,
+        prefetched data are other values are copied accross.
+        """
+        if isinstance(obj, target_class):
+            # page does not require upcasting
+            return obj
+
+        if self.queryset._deferred_upcasting:
+            # set cached_property value to avoid content type queries
+            obj.specific_class = target_class
+            new_obj = obj.specific_deferred
+        else:
+            new_obj = obj
+            for rel in rel_name.split('__'):
+                try:
+                    new_obj = getattr(new_obj, rel)
+                except (ObjectDoesNotExist, AttributeError):
+                    warnings.warn(
+                        "The specific version of the following page could not be "
+                        "returned, because its row in the specific model's table "
+                        "could not be found: <Page id:{} title:'{}' url_path:'{}'>"
+                        .format(obj.id, obj.title, obj.url_path),
+                        category=RuntimeWarning, stacklevel=3
+                    )
+                    return new_obj
+
+        # copy prefetches
+        if hasattr(obj, '_prefetched_objects_cache'):
+            if not hasattr(new_obj, "_prefetched_objects_cache"):
+                new_obj._prefetched_objects_cache = {}
+            new_obj._prefetched_objects_cache.update(obj._prefetched_objects_cache)
+
+        # copy annotations
+        for key in self.queryset.query.annotations:
+            setattr(new_obj, key, getattr(obj, key, None))
+
+        return new_obj
 
 
 def specific_iterator(qs, defer=False):
