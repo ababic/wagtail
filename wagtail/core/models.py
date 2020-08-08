@@ -2612,7 +2612,7 @@ class Page(AbstractPage, index.Indexed, ClusterableModel, metaclass=PageBase):
 
     def get_view_restrictions(self):
         """Return a query set of all page view restrictions that apply to this page"""
-        return PageViewRestriction.objects.filter(page__in=self.get_ancestors(inclusive=True))
+        return PageViewRestriction.objects.filter(page__in=self.get_ancestors(inclusive=True)).select_related('page')
 
     password_required_template = getattr(settings, 'PASSWORD_REQUIRED_TEMPLATE', 'wagtailcore/password_required.html')
 
@@ -3440,22 +3440,149 @@ class BaseViewRestriction(models.Model):
     password = models.CharField(verbose_name=_('password'), max_length=255, blank=True)
     groups = models.ManyToManyField(Group, verbose_name=_('groups'), blank=True)
 
+    @classmethod
+    def _get_all_cache_key(cls):
+        return f"__all__.{cls._meta.verbose_name_plural.lower()}"
+
+    @classmethod
+    def get_all_queryset(cls):
+        """
+        Return a queryset of all objects of this type, ready for use in permission
+        checking in by ``get_permitted_objects_q()``. Subclasses that depend on
+        relationship values for checking permissions can override this method to prefetch
+        additional data as required.
+        """
+        return cls.objects.all().prefetch_related("groups")
+
+    @classmethod
+    def get_all(cls, cache_target=None):
+        """
+        A wrapper for ``cls.get_all_queryset()``, that caches the result on the supplied
+        ``cache_target`` object, and retrieves it from there if it has been cached
+        previously.
+        """
+        cache_key = cls._get_all_cache_key()
+
+        # Return a cached value from the supplied object if available
+        value = getattr(cache_target, cache_key, None)
+        if value is not None:
+            return value
+
+        value = cls.get_all_queryset()
+
+        # Add reference to the supplied `cache_target`
+        if cache_target is not None:
+            setattr(cache_target, cache_key, value)
+
+        return value
+
+    @classmethod
+    def get_passing_for_user(cls, user, request=None):
+        """
+        Returns all restrictions of this type that the provided ``user`` passes.
+        """
+        for obj in cls.get_all(request or user):
+            if obj.user_passes(user, request):
+                yield obj
+
+    @classmethod
+    def get_permitted_objects_q(cls, user, request=None):
+        """
+        Returns a ``Q`` object that can be used to filter a queryset of objects to only
+        include those that the provided ``user`` is permitted to access, based on all
+        saved restrictions of this type.
+        """
+        accepting_restrictions = tuple(
+            cls.get_passing_for_user(user, request)
+        )
+
+        inclusive_q = Q()
+        for obj in accepting_restrictions:
+            inclusive_q |= obj.affected_objects_q
+
+        restrictive_q = Q()
+        for obj in cls.get_all(request or user):
+            if obj not in accepting_restrictions:
+                restrictive_q |= obj.get_affected_objects_with_conflicts_q(accepting_restrictions)
+
+        return inclusive_q & ~restrictive_q
+
+    def get_affected_objects_q(self):
+        """
+        Returns a ``Q`` object that can be used to filter a queryset of objects to only
+        include those affected by this restriction.
+
+        Must be overridden for each subclass.
+        """
+        raise NotImplementedError
+
+    @property
+    def affected_objects_q(self):
+        """
+        Allows ``get_affected_objects_q()`` to be invoked more easily, while keeping the
+        functionality easy to override.
+        """
+        return self.get_affected_objects_q()
+
+    def get_affected_objects_with_conflicts_q(self, conflicting_restrictions):
+        """
+        Similar to ``get_affected_objects_q()``, but returns a more complex ``Q`` that
+        excludes content affected by ``conflicting_restrictions`` (an iterable of
+        restrictions of the same type) if they happen to be applied to a decendant node
+        in the page (or collection) tree.
+
+        Utilises ``get_affected_objects_q()``, so is unlikely to require overriding on
+        subclasses.
+        """
+        q = self.affected_objects_q
+        for obj in conflicting_restrictions:
+            if obj.is_descendant_of(self):
+                q &= ~obj.affected_objects_q
+        return q
+
+    def is_descendant_of(self, other):
+        """
+        Returns a boolean indicating whether this object is a descandant of another
+        instance of the same type. Just in case a subclass has no concept of a tree,
+        ``False`` is returned by default.
+        """
+        raise False
+
     def accept_request(self, request):
+        return self.user_passes(request.user, request)
+
+    def user_passes(self, user, request=None):
+        """
+        Return a boolean indicating whether the supplied ``user`` passes the restriction.
+        :param user:
+            The ``AbstractUser`` or ``AnonymousUser`` instance being checked.
+        :param request:
+            A ``HttpRequest`` instance, typically representing a request being made by
+            ``user``. In contexts where a different user is making the request, or where
+            there is no request at all, any mutable object capable of supporting ad hoc
+            attribute assignment can be provided to improve efficiency when calling the
+            method more than once.
+        """
         if self.restriction_type == BaseViewRestriction.PASSWORD:
-            passed_restrictions = request.session.get(self.passed_view_restrictions_session_key, [])
-            if self.id not in passed_restrictions:
+            if getattr(request, 'user', None) == user:
+                return self.id in request.session.get(self.passed_view_restrictions_session_key, ())
+            return False
+
+        if self.restriction_type == BaseViewRestriction.LOGIN:
+            return user.is_authenticated and user.is_active
+
+        if self.restriction_type == BaseViewRestriction.GROUPS:
+            if not user.is_authenticated or not user.is_active:
                 return False
 
-        elif self.restriction_type == BaseViewRestriction.LOGIN:
-            if not request.user.is_authenticated:
-                return False
+            if user.is_superuser:
+                return True
 
-        elif self.restriction_type == BaseViewRestriction.GROUPS:
-            if not request.user.is_superuser:
-                current_user_groups = request.user.groups.all()
-
-                if not any(group in current_user_groups for group in self.groups.all()):
-                    return False
+            user_groups = user.groups.all()
+            for group in self.groups.all():
+                if group in user_groups:
+                    return True
+            return False
 
         return True
 
@@ -3533,6 +3660,19 @@ class PageViewRestriction(BaseViewRestriction):
         verbose_name = _('page view restriction')
         verbose_name_plural = _('page view restrictions')
 
+    @classmethod
+    def get_all_queryset(cls):
+        return (
+            super().get_all_queryset()
+            .select_related("page").order_by('-page__path')
+        )
+
+    def get_affected_objects_q(self):
+        return Q(path__startswith=self.page.path)
+
+    def is_descendant_of(self, other):
+        return self.page.is_descendant_of(other.page)
+
     def save(self, user=None, **kwargs):
         return super().save(user, specific_instance=self.page.specific, **kwargs)
 
@@ -3561,6 +3701,20 @@ class CollectionViewRestriction(BaseViewRestriction):
     class Meta:
         verbose_name = _('collection view restriction')
         verbose_name_plural = _('collection view restrictions')
+
+    @classmethod
+    def get_all_queryset(cls):
+        return (
+            super().get_all_queryset()
+            .select_related("collection")
+            .order_by('-collection__path')
+        )
+
+    def get_affected_objects_q(self):
+        return Q(collection__path__startswith=self.collection.path)
+
+    def is_descendant_of(self, other):
+        return self.collection.is_descendant_of(other.collection)
 
 
 class Collection(TreebeardPathFixMixin, MP_Node):
