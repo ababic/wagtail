@@ -67,7 +67,7 @@ class PagesAdminAPIViewSet(PagesAPIViewSet):
 
         # Hide root page
         # TODO: Add "include_root" flag
-        queryset = queryset.exclude(depth=1).specific()
+        queryset = queryset.exclude(depth=1).defer_large_fields().specific()
 
         return queryset
 

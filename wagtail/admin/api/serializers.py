@@ -106,7 +106,7 @@ class PageAncestorsField(Field):
     def to_representation(self, page):
         serializer_class = get_serializer_class(Page, ['id', 'type', 'detail_url', 'html_url', 'title', 'admin_display_title'], meta_fields=['type', 'detail_url', 'html_url'], base=AdminPageSerializer)
         serializer = serializer_class(context=self.context, many=True)
-        return serializer.to_representation(page.get_ancestors())
+        return serializer.to_representation(page.get_ancestors().defer_large_fields().specific())
 
 
 class AdminPageSerializer(PageSerializer):
