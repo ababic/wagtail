@@ -35,7 +35,7 @@ class Sitemap(DjangoSitemap):
             .get_descendants(inclusive=True)
             .live()
             .public()
-            .order_by('path')
+            .defer_large_fields()
             .specific())
 
     def _urls(self, page, protocol, domain):
