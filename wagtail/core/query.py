@@ -1,12 +1,11 @@
 import posixpath
 import warnings
-from collections import defaultdict
 
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import CharField, Q
 from django.db.models.functions import Length, Substr
-from django.db.models.query import BaseIterable, ModelIterable
+from django.db.models.query import ModelIterable
 from treebeard.mp_tree import MP_NodeQuerySet
 
 from wagtail.search.queryset import SearchableQuerySetMixin
@@ -390,36 +389,25 @@ class PageQuerySet(SearchableQuerySetMixin, TreeQuerySet):
         for page in self.live():
             page.unpublish()
 
+    def in_site(self, site):
+        """
+        This filters the QuerySet to only contain pages within the specified site.
+        """
+        return self.descendant_of(site.root_page, inclusive=True)
+
     def defer_large_fields(self):
         """
         Apply to a queryset to defer fetching of 'large' fields when the
         queryset is evaluated. This includes all instances of
         ``wagtail.core.fields.RichTextField`` or
         ``wagtail.core.fields.StreamField`` on the base model, and (if used in
-        combination with ``specific_new()``) all of the specific subclasses.
+        combination with ``specific()``) all of the specific subclasses.
         """
         clone = self._clone()
         clone._defer_large_fields = True
         return clone
 
     def specific(self, defer=False):
-        """
-        This efficiently gets all the specific pages for the queryset, using
-        the minimum number of queries.
-
-        When the "defer" keyword argument is set to True, only the basic page
-        fields will be loaded and all specific fields will be deferred. It
-        will still generate a query for each page type though (this may be
-        improved to generate only a single query in a future release).
-        """
-        clone = self._clone()
-        if defer:
-            clone._iterable_class = DeferredSpecificIterable
-        else:
-            clone._iterable_class = SpecificIterable
-        return clone
-
-    def specific_new(self, defer=False):
         """
         Apply to a queryset to make it return specific page instances when
         evaluated.
@@ -438,12 +426,6 @@ class PageQuerySet(SearchableQuerySetMixin, TreeQuerySet):
         if defer is True:
             clone._deferred_upcasting = True
         return clone
-
-    def in_site(self, site):
-        """
-        This filters the QuerySet to only contain pages within the specified site.
-        """
-        return self.descendant_of(site.root_page, inclusive=True)
 
     def get_used_models(self):
         for ct in ContentType.objects.filter(pages__id__in=self.values_list('id', flat=True)):
@@ -612,88 +594,3 @@ class PageIterable(ModelIterable):
             setattr(new_obj, key, getattr(obj, key, None))
 
         return new_obj
-
-
-def specific_iterator(qs, defer=False):
-    """
-    This efficiently iterates all the specific pages in a queryset, using
-    the minimum number of queries.
-
-    This should be called from ``PageQuerySet.specific``
-    """
-    from wagtail.core.models import Page
-
-    annotation_aliases = qs.query.annotations.keys()
-    values = qs.values('pk', 'content_type', *annotation_aliases)
-
-    annotations_by_pk = defaultdict(list)
-    if annotation_aliases:
-        # Extract annotation results keyed by pk so we can reapply to fetched pages.
-        for data in values:
-            annotations_by_pk[data['pk']] = {k: v for k, v in data.items() if k in annotation_aliases}
-
-    pks_and_types = [[v['pk'], v['content_type']] for v in values]
-    pks_by_type = defaultdict(list)
-    for pk, content_type in pks_and_types:
-        pks_by_type[content_type].append(pk)
-
-    # Content types are cached by ID, so this will not run any queries.
-    content_types = {pk: ContentType.objects.get_for_id(pk)
-                     for _, pk in pks_and_types}
-
-    # Get the specific instances of all pages, one model class at a time.
-    pages_by_type = {}
-    missing_pks = []
-
-    for content_type, pks in pks_by_type.items():
-        # look up model class for this content type, falling back on the original
-        # model (i.e. Page) if the more specific one is missing
-        model = content_types[content_type].model_class() or qs.model
-        pages = model.objects.filter(pk__in=pks)
-
-        if defer:
-            # Defer all specific fields
-            fields = [field.attname for field in Page._meta.get_fields() if field.concrete]
-            pages = pages.only(*fields)
-
-        pages_for_type = {page.pk: page for page in pages}
-        pages_by_type[content_type] = pages_for_type
-        missing_pks.extend(
-            pk for pk in pks if pk not in pages_for_type
-        )
-
-    # Fetch generic pages to supplement missing items
-    if missing_pks:
-        generic_pages = Page.objects.filter(pk__in=missing_pks).select_related('content_type').in_bulk()
-        warnings.warn(
-            "Specific versions of the following pages could not be found. "
-            "This is most likely because a database migration has removed "
-            "the relevant table or record since the page was created:\n{}".format([
-                {'id': p.id, 'title': p.title, 'type': p.content_type}
-                for p in generic_pages.values()
-            ]), category=RuntimeWarning
-        )
-    else:
-        generic_pages = {}
-
-    # Yield all pages in the order they occurred in the original query.
-    for pk, content_type in pks_and_types:
-        try:
-            page = pages_by_type[content_type][pk]
-        except KeyError:
-            page = generic_pages[pk]
-        if annotation_aliases:
-            # Reapply annotations before returning
-            for annotation, value in annotations_by_pk.get(page.pk, {}).items():
-                setattr(page, annotation, value)
-        yield page
-
-
-class SpecificIterable(BaseIterable):
-    def __iter__(self):
-        return specific_iterator(self.queryset)
-
-
-class DeferredSpecificIterable(BaseIterable):
-    def __iter__(self):
-        return specific_iterator(self.queryset, defer=True)
