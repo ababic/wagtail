@@ -1,23 +1,29 @@
 import functools
 import re
+import types
+from itertools import chain
 
 from django import forms
 from django.core.exceptions import FieldDoesNotExist, ImproperlyConfigured
-from django.db.models.fields import CharField, TextField
+from django.db import models
+from django.db.models.fields import CharField, Field, TextField, reverse_related
 from django.forms.formsets import DELETION_FIELD_NAME, ORDERING_FIELD_NAME
 from django.forms.models import fields_for_model
+from django.forms.widgets import Widget
 from django.template.loader import render_to_string
 from django.utils.functional import cached_property
+from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.text import capfirst
 from django.utils.translation import gettext_lazy
 from taggit.managers import TaggableManager
 
 from wagtail.admin import compare, widgets
-from wagtail.core.fields import RichTextField
+from wagtail.core.fields import RichTextField, StreamField
 from wagtail.core.models import Page
-from wagtail.core.utils import camelcase_to_underscore, resolve_model_string
-from wagtail.utils.decorators import cached_classmethod
+from wagtail.core.utils import accepts_kwarg, camelcase_to_underscore, resolve_model_string
+
+from modelcluster.fields import ParentalKey
 
 # DIRECT_FORM_FIELD_OVERRIDES, FORM_FIELD_OVERRIDES are imported for backwards
 # compatibility, as people are likely importing them from here and then
@@ -63,6 +69,27 @@ def get_form_for_model(
     return metaclass(class_name, (form_class,), form_class_attrs)
 
 
+def get_editable_field_names_for_model(model, exclude=()):
+    opts = model._meta
+    sortable_private_fields = [f for f in opts.private_fields if isinstance(f, Field)]
+    for field in sorted(chain(opts.concrete_fields, sortable_private_fields, opts.many_to_many)):
+        if getattr(field, 'editable', True) and field.name not in exclude:
+            yield field.name
+
+
+def get_model_field_or_attribute(model, attr_name):
+    try:
+        return model._meta.get_field(attr_name)
+    except FieldDoesNotExist:
+        instance = model()
+        if hasattr(instance, attr_name):
+            return getattr(instance, attr_name)
+        raise AttributeError(
+            f"{model.__name__} instances have no field or attribute "
+            f"matching the name '{attr_name}'."
+        )
+
+
 def extract_panel_definitions_from_model_class(model, exclude=None):
     if hasattr(model, 'panels'):
         return model.panels
@@ -87,13 +114,65 @@ def extract_panel_definitions_from_model_class(model, exclude=None):
     return panels
 
 
+def get_edit_handler(model, instance=None, request=None):
+    if hasattr(model, "edit_handler"):
+        return model.edit_handler
+
+    if hasattr(model, "get_edit_handler"):
+        method = model.get_edit_handler
+        kwargs = {}
+        if accepts_kwarg(method, "instance"):
+            kwargs["instance"] = instance
+        if accepts_kwarg(method, "request"):
+            kwargs["request"] = request
+        return method(**kwargs)
+
+    if hasattr(model, "tab_definitions"):
+        return TabbedInterface(children=model.tab_definitions)
+
+    return ObjectList(children=getattr(model, "panels", None))
+
+
+def get_panel_class(attr_name, model_attr):
+    from wagtail.documents.models import AbstractDocument
+    from wagtail.documents.edit_handlers import DocumentChooserPanel
+    from wagtail.images.models import AbstractImage
+    from wagtail.images.edit_handlers import ImageChooserPanel
+    from wagtail.snippets.models import get_snippet_models
+    from wagtail.snippets.edit_handlers import SnippetChooserPanel
+
+    if isinstance(model_attr, StreamField):
+        return StreamFieldPanel
+    if isinstance(model_attr, RichTextField):
+        return RichTextFieldPanel
+    if isinstance(model_attr, models.ForeignKey):
+        target_model = model_attr.related_model
+        if issubclass(target_model, Page):
+            return PageChooserPanel
+        if issubclass(target_model, AbstractImage):
+            return ImageChooserPanel
+        if issubclass(target_model, AbstractDocument):
+            return DocumentChooserPanel
+        if target_model in get_snippet_models():
+            return SnippetChooserPanel
+    if not isinstance(model_attr, models.fields.Field):
+        return ReadOnlyPanel
+    return FieldPanel
+
+
 class EditHandler:
     """
     Abstract class providing sensible default behaviours for objects implementing
     the EditHandler API
     """
+    tab_class = None
+    multifield_panel_class = None
+    row_panel_class = None
+    inline_panel_class = None
+    default_field_panel_class = None
+    default_non_field_panel_class = None
 
-    def __init__(self, heading='', classname='', help_text=''):
+    def __init__(self, heading="", classname="", help_text=""):
         self.heading = heading
         self.classname = classname
         self.help_text = help_text
@@ -247,14 +326,16 @@ class BaseCompositeEditHandler(EditHandler):
     Abstract class for EditHandlers that manage a set of sub-EditHandlers.
     Concrete subclasses must attach a 'children' property
     """
+    panels = None
 
-    def __init__(self, children=(), *args, **kwargs):
+    def __init__(self, children=(), exclude_fields=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.children = children
+        self.exclude_fields = exclude_fields or ()
 
     def clone_kwargs(self):
         kwargs = super().clone_kwargs()
-        kwargs['children'] = self.children
+        kwargs["children"] = self.children
         return kwargs
 
     def widget_overrides(self):
@@ -279,11 +360,194 @@ class BaseCompositeEditHandler(EditHandler):
         return formsets
 
     def html_declarations(self):
-        return mark_safe(''.join([c.html_declarations() for c in self.children]))
+        return mark_safe("".join([c.html_declarations() for c in self.children]))
+
+    @staticmethod
+    def get_panel_class(name, model_field_or_attr):
+        return get_panel_class(name, model_field_or_attr)
+
+    def create_panel(self, definition, **kwargs):
+        if isinstance(definition, tuple) and len(definition) == 1:
+            # unpack single-item tuples
+            definition = definition[0]
+
+        if isinstance(definition, str):
+            return self.create_panel_from_string(definition, **kwargs)
+
+        if isinstance(definition, tuple):
+            return self.create_panel_from_tuple(definition, **kwargs)
+
+        if isinstance(definition, dict):
+            return self.create_panel_from_dict(definition, **kwargs)
+
+        if isinstance(definition, EditHandler):
+            return definition
+
+    def create_panel_from_string(self, value, **kwargs):
+        """
+        Return a panel instance to represent the provided string value - which
+        should be a model field name or an attribute of the instance or model
+        class.
+
+        Any keyword arguments passed to this method will be passed on to
+        the constructor method when creating the panel instance.
+        """
+        field_or_attr = get_model_field_or_attribute(self.model, value)
+
+        if isinstance(field_or_attr, reverse_related.ManyToOneRel) and isinstance(
+            field_or_attr.field, ParentalKey
+        ):
+            return self.create_inline_panel(value, **kwargs)
+
+        klass = self.get_panel_class(value, field_or_attr)
+        return klass(value, **kwargs)
+
+    def create_panel_from_tuple(self, value, **kwargs):
+        """
+        Return a panel instance appropriate for the provided tuple of values.
+
+        Any keyword arguments passed to this method will be passed on to
+        the constructor method when creating the panel instance.
+
+        Tuples can be used in panel definitions to define sevral things:
+
+        1.  A standard field panel with an alterative widget instance or class.
+            For example:
+
+            ('field_name', WidgetClass(key=value))
+            ('field_name', WidgetClass)
+
+        2.  A MultiFieldPanel with a heading value, optional classname,
+            and a list of fields/panels to include as children. For example:
+
+            ('heading', ['field_one', 'field_two'])
+            ('heading', 'classname', ['field_one', 'field_two'])
+
+        3.  An InlinePanel with a relationship name, optional
+            heading value, and a list of fields/panels to include. For example:
+
+            ('relation_name', ['field_one', 'field_two'])
+            ('relation_name', "Page categories", ['field_one', 'field_two'])
+
+        4.  A FieldRowPanel, where each item is a field to be included.
+            For example:
+
+            ('field_one, ('field_two', CustomWidget), FieldPanel('field_three'))
+        """
+        first_item = value[0]
+        last_item = value[-1]
+
+        if isinstance(last_item, Widget) or issubclass(last_item, Widget):
+            kwargs.update(
+                widget=last_item,
+                classname=value[1] if len(value) == 3 else kwargs.get("classname"),
+            )
+            return self.create_panel_from_string(first_item, **kwargs)
+
+        if isinstance(last_item, list):
+            try:
+                field = get_model_field_or_attribute(self.model, first_item)
+            except AttributeError:
+                field = None
+
+            if field:
+                kwargs.update(
+                    related_model=field.model,
+                    panels=last_item,
+                    heading=value[1] if len(value) == 3 else kwargs.get("heading"),
+                )
+                return self.create_inline_panel(first_item, **kwargs)
+            elif field is None:
+                kwargs.update(
+                    heading=first_item,
+                    children=last_item,
+                    classname=value[1] if len(value) == 3 else kwargs.get("classname"),
+                )
+                return self.create_multifield_panel(**kwargs)
+            return
+
+        return self.create_row_panel(value, **kwargs)
+
+    def create_panel_from_dict(self, value, **kwargs):
+        return
+
+    def create_tab(self, definition, **kwargs):
+        if isinstance(definition, tuple):
+            return self.create_tab_from_tuple(definition, **kwargs)
+        if isinstance(definition, dict):
+            return self.create_tab_from_dict(definition, **kwargs)
+        if isinstance(definition, ObjectList):
+            return definition
+
+    def create_tab_from_tuple(self, value, **kwargs):
+        kwargs.update(
+            heading=value[0],
+            children=value[-1],
+            classname=value[1] if len(value) == 3 else None,
+        )
+        return self.get_tab_class()(**kwargs)
+
+    def create_tab_from_dict(self, value, **kwargs):
+        kwargs.update(value)
+        return self.get_tab_class()(**kwargs)
+
+    def get_panel_definitions(self):
+        definitions = self.children or self.panels or getattr(self.model, "panels", ())
+        if definitions:
+            return definitions
+        return list(get_editable_field_names_for_model(self.model, exclude=self.exclude_fields))
+
+    def get_panels(self):
+        """
+        Generator that returns unbound FieldPanel, InlinePanel, FieldRowPanel and
+        MultiFieldPanel instances from a mixed sequence of field names, panel
+        instances, and tuples.
+        """
+        for value in self.get_panel_definitions():
+            panel = self.create_panel(value)
+            if panel is not None:
+                yield panel
+
+    def get_tab_definitions(self):
+        return ()
+
+    def get_tabs(self):
+        """
+        Generator that returns unbound tab (ObjectList) instances from
+        from a mixed sequence of definitions in tuple or dict format,
+        and existing tab instances.
+        """
+        for value in self.get_tab_definitions():
+            tab = self.create_tab(value)
+            if tab is not None:
+                yield tab
+
+    def get_row_panel_class(self):
+        return self.row_panel_class or FieldRowPanel
+
+    def get_multifield_panel_class(self):
+        return self.multifield_panel_class or MultiFieldPanel
+
+    def get_inline_panel_class(self):
+        return self.inline_panel_class or InlinePanel
+
+    def get_tab_class(self):
+        return self.inline_panel_class or ObjectList
+
+    def create_row_panel(self, children, **kwargs):
+        kwargs["children"] = children
+        return self.get_row_panel_class()(**kwargs)
+
+    def create_multifield_panel(self, heading, children, **kwargs):
+        kwargs.update(heading=heading, children=children)
+        return self.get_multifield_panel_class()(**kwargs)
+
+    def create_inline_panel(self, rel_name, panels=None, **kwargs):
+        kwargs["panels"] = panels
+        return self.get_inline_panel_class()(rel_name, **kwargs)
 
     def on_model_bound(self):
-        self.children = [child.bind_to(model=self.model)
-                         for child in self.children]
+        self.children = [child.bind_to(model=self.model) for child in self.get_panels()]
 
     def on_instance_bound(self):
         self.children = [child.bind_to(instance=self.instance)
@@ -341,11 +605,11 @@ class BaseFormEditHandler(BaseCompositeEditHandler):
             raise AttributeError(
                 '%s is not bound to a model yet. Use `.bind_to(model=model)` '
                 'before using this method.' % self.__class__.__name__)
+
         # If a custom form class was passed to the EditHandler, use it.
         # Otherwise, use the base_form_class from the model.
         # If that is not defined, use WagtailAdminModelForm.
-        model_form_class = getattr(self.model, 'base_form_class',
-                                   WagtailAdminModelForm)
+        model_form_class = getattr(self.model, "base_form_class", WagtailAdminModelForm)
         base_form_class = self.base_form_class or model_form_class
 
         return get_form_for_model(
@@ -358,6 +622,7 @@ class BaseFormEditHandler(BaseCompositeEditHandler):
 
 class TabbedInterface(BaseFormEditHandler):
     template = "wagtailadmin/edit_handlers/tabbed_interface.html"
+    tab_definitions = None
 
     def __init__(self, *args, **kwargs):
         self.base_form_class = kwargs.pop('base_form_class', None)
@@ -368,9 +633,71 @@ class TabbedInterface(BaseFormEditHandler):
         kwargs['base_form_class'] = self.base_form_class
         return kwargs
 
+    def get_tab_definitions(self):
+        return self.children or self.tab_definitions or getattr(self.model, "tab_definitions", ())
+
+    def on_model_bound(self):
+        self.children = [child.bind_to(model=self.model) for child in self.get_tabs()]
+
 
 class ObjectList(TabbedInterface):
     template = "wagtailadmin/edit_handlers/object_list.html"
+
+    def on_model_bound(self):
+        self.children = [child.bind_to(model=self.model) for child in self.get_panels()]
+
+
+class PageTabbedInterface(TabbedInterface):
+    content_panels = None
+    promote_panels = None
+    settings_panels = None
+    extra_tab_definitions = None
+
+    def get_content_panels(self):
+        if self.content_panels is not None:
+            return self.content_panels
+        return getattr(self.model, "content_panels", None)
+
+    def get_promote_panels(self):
+        if self.promote_panels is not None:
+            return self.promote_panels
+        return getattr(self.model, "promote_panels", None)
+
+    def get_settings_panels(self):
+        if self.settings_panels is not None:
+            return self.settings_panels
+        return getattr(self.model, "settings_panels", None)
+
+    def get_extra_tab_definitions(self):
+        if self.extra_tab_definitions is not None:
+            return self.extra_tab_definitions
+        return getattr(self.model, "extra_tab_definitions", None)
+
+    def get_tab_definitions(self):
+        # Respect 'children' if provided at initialisation, or allow
+        # a 'tab_definitions' value on this class (or the model class)
+        # to completely override things
+        definitions = super().get_tab_definitions()
+        if definitions:
+            return definitions
+
+        definitions = []
+        content_panels = self.get_content_panels()
+        if content_panels:
+            definitions.append((gettext_lazy("Content"), content_panels))
+
+        promote_panels = self.get_promote_panels()
+        if promote_panels:
+            definitions.append((gettext_lazy("Promote"), promote_panels))
+
+        extra_tab_definitions = self.get_extra_tab_definitions()
+        if extra_tab_definitions:
+            definitions.extend(extra_tab_definitions)
+
+        settings_panels = self.get_settings_panels()
+        if settings_panels:
+            definitions.append((gettext_lazy("Settings"), "settings", settings_panels))
+        return definitions
 
 
 class FieldRowPanel(BaseCompositeEditHandler):
@@ -572,9 +899,7 @@ class ReadOnlyPanel(EditHandler):
     def clone_kwargs(self):
         kwargs = super().clone_kwargs()
         kwargs.update(
-            attr_name=self.attr_name,
-            template=self.value_template,
-            value=self.value,
+            attr_name=self.attr_name, template=self.value_template, value=self.value
         )
         return kwargs
 
@@ -606,7 +931,7 @@ class ReadOnlyPanel(EditHandler):
             render_to_string(
                 self.template,
                 {
-                    "id": self.id_for_label,
+                    "id": self.id_for_label(),
                     "instance": self.instance,
                     "attr_name": self.attr_name,
                     "value": self.value,
@@ -625,9 +950,10 @@ class ReadOnlyPanel(EditHandler):
     def render_as_field(self):
         return mark_safe(
             render_to_string(
-                self.field_template, {"field": self.self, "field_type": "readonly"}
+                self.field_template, {"field": self, "field_type": "readonly"}
             )
         )
+
 
 class BaseChooserPanel(FieldPanel):
     """
@@ -724,6 +1050,7 @@ class InlinePanel(EditHandler):
         self.label = label
         self.min_num = min_num
         self.max_num = max_num
+        self.child_edit_handler = MultiFieldPanel(self.panels, heading=self.heading)
 
     def clone_kwargs(self):
         kwargs = super().clone_kwargs()
@@ -736,50 +1063,40 @@ class InlinePanel(EditHandler):
         )
         return kwargs
 
-    def get_panel_definitions(self):
-        # Look for a panels definition in the InlinePanel declaration
-        if self.panels is not None:
-            return self.panels
-        # Failing that, get it from the model
-        return extract_panel_definitions_from_model_class(
-            self.db_field.related_model,
-            exclude=[self.db_field.field.name]
-        )
-
-    def get_child_edit_handler(self):
-        panels = self.get_panel_definitions()
-        child_edit_handler = MultiFieldPanel(panels, heading=self.heading)
-        return child_edit_handler.bind_to(model=self.db_field.related_model)
-
     def required_formsets(self):
-        child_edit_handler = self.get_child_edit_handler()
         return {
             self.relation_name: {
-                'fields': child_edit_handler.required_fields(),
-                'widgets': child_edit_handler.widget_overrides(),
-                'min_num': self.min_num,
-                'validate_min': self.min_num is not None,
-                'max_num': self.max_num,
-                'validate_max': self.max_num is not None
+                "fields": self.child_edit_handler.required_fields(),
+                "widgets": self.child_edit_handler.widget_overrides(),
+                "min_num": self.min_num,
+                "validate_min": self.min_num is not None,
+                "max_num": self.max_num,
+                "validate_max": self.max_num is not None,
             }
         }
 
     def html_declarations(self):
-        return self.get_child_edit_handler().html_declarations()
+        return self.child_edit_handler.html_declarations()
 
     def get_comparison(self):
         field_comparisons = []
 
-        for panel in self.get_panel_definitions():
+        for panel in self.get_panels():
             field_comparisons.extend(
-                panel.bind_to(model=self.db_field.related_model)
-                .get_comparison())
+                panel.bind_to(model=self.db_field.related_model).get_comparison()
+            )
 
-        return [functools.partial(compare.ChildRelationComparison, self.db_field, field_comparisons)]
+        return [
+            functools.partial(
+                compare.ChildRelationComparison, self.db_field, field_comparisons
+            )
+        ]
 
     def on_model_bound(self):
         manager = getattr(self.model, self.relation_name)
         self.db_field = manager.rel
+        # at this point, the MultiFieldPanel will create it's own panels
+        self.child_edit_handler = self.child_edit_handler.bind_to(model=self.db_field.model)
 
     def on_form_bound(self):
         self.formset = self.form.formsets[self.relation_name]
@@ -793,42 +1110,46 @@ class InlinePanel(EditHandler):
             if self.formset.can_order:
                 subform.fields[ORDERING_FIELD_NAME].widget = forms.HiddenInput()
 
-            child_edit_handler = self.get_child_edit_handler()
-            self.children.append(child_edit_handler.bind_to(
-                instance=subform.instance, request=self.request, form=subform))
+            self.children.append(
+                self.child_edit_handler.bind_to(
+                    instance=subform.instance, request=self.request, form=subform
+                )
+            )
 
         # if this formset is valid, it may have been re-ordered; respect that
         # in case the parent form errored and we need to re-render
         if self.formset.can_order and self.formset.is_valid():
             self.children.sort(
-                key=lambda child: child.form.cleaned_data[ORDERING_FIELD_NAME] or 1)
+                key=lambda child: child.form.cleaned_data[ORDERING_FIELD_NAME] or 1
+            )
 
         empty_form = self.formset.empty_form
         empty_form.fields[DELETION_FIELD_NAME].widget = forms.HiddenInput()
         if self.formset.can_order:
             empty_form.fields[ORDERING_FIELD_NAME].widget = forms.HiddenInput()
 
-        self.empty_child = self.get_child_edit_handler()
+        self.empty_child = self.child_edit_handler
         self.empty_child = self.empty_child.bind_to(
-            instance=empty_form.instance, request=self.request, form=empty_form)
+            instance=empty_form.instance, request=self.request, form=empty_form
+        )
 
     template = "wagtailadmin/edit_handlers/inline_panel.html"
 
     def render(self):
-        formset = render_to_string(self.template, {
-            'self': self,
-            'can_order': self.formset.can_order,
-        })
+        formset = render_to_string(
+            self.template, {"self": self, "can_order": self.formset.can_order}
+        )
         js = self.render_js_init()
         return widget_with_script(formset, js)
 
     js_template = "wagtailadmin/edit_handlers/inline_panel.js"
 
     def render_js_init(self):
-        return mark_safe(render_to_string(self.js_template, {
-            'self': self,
-            'can_order': self.formset.can_order,
-        }))
+        return mark_safe(
+            render_to_string(
+                self.js_template, {"self": self, "can_order": self.formset.can_order}
+            )
+        )
 
 
 # This allows users to include the publishing panel in their own per-model override
@@ -852,10 +1173,7 @@ class PublishingPanel(MultiFieldPanel):
 
 class PrivacyModalPanel(EditHandler):
     def __init__(self, **kwargs):
-        updated_kwargs = {
-            'heading': gettext_lazy('Privacy'),
-            'classname': 'privacy'
-        }
+        updated_kwargs = {"heading": gettext_lazy("Privacy"), "classname": "privacy"}
         updated_kwargs.update(kwargs)
         super().__init__(**updated_kwargs)
 
@@ -895,35 +1213,11 @@ Page.settings_panels = [
 Page.base_form_class = WagtailAdminPageForm
 
 
-@cached_classmethod
-def get_edit_handler(cls):
-    """
-    Get the EditHandler to use in the Wagtail admin when editing this page type.
-    """
-    if hasattr(cls, 'edit_handler'):
-        edit_handler = cls.edit_handler
-    else:
-        # construct a TabbedInterface made up of content_panels, promote_panels
-        # and settings_panels, skipping any which are empty
-        tabs = []
-
-        if cls.content_panels:
-            tabs.append(ObjectList(cls.content_panels,
-                                   heading=gettext_lazy('Content')))
-        if cls.promote_panels:
-            tabs.append(ObjectList(cls.promote_panels,
-                                   heading=gettext_lazy('Promote')))
-        if cls.settings_panels:
-            tabs.append(ObjectList(cls.settings_panels,
-                                   heading=gettext_lazy('Settings'),
-                                   classname='settings'))
-
-        edit_handler = TabbedInterface(tabs, base_form_class=cls.base_form_class)
-
-    return edit_handler.bind_to(model=cls)
+def get_page_edit_handler(cls, instance=None, request=None):
+    return PageTabbedInterface().bind_to(model=cls, instance=instance, request=request)
 
 
-Page.get_edit_handler = get_edit_handler
+Page.get_edit_handler = types.MethodType(get_page_edit_handler, Page)
 
 
 class StreamFieldPanel(FieldPanel):
