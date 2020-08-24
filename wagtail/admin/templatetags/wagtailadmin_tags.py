@@ -19,6 +19,7 @@ from django.utils.safestring import mark_safe
 from django.utils.timesince import timesince
 from django.utils.translation import gettext_lazy as _
 
+from wagtail.admin.edit_handlers import ReadOnlyPanel
 from wagtail.admin.localization import get_js_translation_strings
 from wagtail.admin.log_action_registry import registry as log_action_registry
 from wagtail.admin.menu import admin_menu
@@ -246,6 +247,12 @@ def render_with_errors(bound_field):
     If the field (a BoundField instance) has errors on it, and the associated widget implements
     a render_with_errors method, call that; otherwise, call the regular widget rendering mechanism.
     """
+
+    # ReadOnlyPanels add themselves as 'field' to the context when rendering,
+    # allowing them to use the same templates as field panels
+    if isinstance(bound_field, ReadOnlyPanel):
+        return bound_field.value_as_html()
+
     widget = bound_field.field.widget
     if bound_field.errors and hasattr(widget, 'render_with_errors'):
         return widget.render_with_errors(

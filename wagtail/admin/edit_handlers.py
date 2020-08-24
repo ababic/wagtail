@@ -9,6 +9,7 @@ from django.forms.models import fields_for_model
 from django.template.loader import render_to_string
 from django.utils.functional import cached_property
 from django.utils.safestring import mark_safe
+from django.utils.text import capfirst
 from django.utils.translation import gettext_lazy
 from taggit.managers import TaggableManager
 
@@ -544,6 +545,89 @@ class RichTextFieldPanel(FieldPanel):
     def get_comparison_class(self):
         return compare.RichTextFieldComparison
 
+
+class ReadOnlyPanel(EditHandler):
+    """
+    A panel that can be used to display an attribute value from the
+    current instance, named by ``attr_name``. The attribute can be a
+    field, property method, or standard method that only takes a single
+    ``self`` or ``cls`` argument.
+
+    This panel uses the same templates as ``FieldPanel`` to allow it to
+    be used in much the same way. Only, instead of adding a ``BoundField``
+    instance to the context as ``field``, it adds itself.
+    """
+
+    object_template = "wagtailadmin/edit_handlers/single_field_panel.html"
+    field_template = "wagtailadmin/edit_handlers/field_panel_field.html"
+    value_template = "wagtailadmin/edit_handlers/readonly_value.html"
+
+    def __init__(self, attr_name, template=None, **kwargs):
+        super().__init__(**kwargs)
+        self.attr_name = attr_name
+        if template is not None:
+            self.value_template = template
+        self.value = kwargs.get('value')
+
+    def clone_kwargs(self):
+        kwargs = super().clone_kwargs()
+        kwargs.update(
+            attr_name=self.attr_name,
+            template=self.value_template,
+            value=self.value,
+        )
+        return kwargs
+
+    def on_instance_bound(self):
+        attr = getattr(self.instance, self.attr_name)
+
+        # set self.value
+        if callable(attr):
+            self.value = attr()
+        self.value = attr
+
+        # set self.heading
+        if not self.heading:
+            if hasattr(attr, "short_description"):
+                self.heading = attr.short_description
+            else:
+                self.heading = capfirst(self.attr_name)
+
+    def label_tag(self):
+        # Mimics BoundField.label_tag()
+        return format_html('<label id="{}">{}</label>', self.id_for_label, self.heading)
+
+    def id_for_label(self):
+        # Mimics BoundField.id_for_label()
+        return f"id_{self.attr_name.lower()}"
+
+    def value_as_html(self):
+        return mark_safe(
+            render_to_string(
+                self.template,
+                {
+                    "id": self.id_for_label,
+                    "instance": self.instance,
+                    "attr_name": self.attr_name,
+                    "value": self.value,
+                },
+            )
+        )
+
+    def render_as_object(self):
+        return mark_safe(
+            render_to_string(
+                self.object_template,
+                {"self": self, FieldPanel.TEMPLATE_VAR: self, "field": self},
+            )
+        )
+
+    def render_as_field(self):
+        return mark_safe(
+            render_to_string(
+                self.field_template, {"field": self.self, "field_type": "readonly"}
+            )
+        )
 
 class BaseChooserPanel(FieldPanel):
     """
