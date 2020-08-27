@@ -428,10 +428,15 @@ class PageQuerySet(SearchableQuerySetMixin, TreeQuerySet):
         return clone
 
     def get_used_models(self):
-        for ct in ContentType.objects.filter(pages__id__in=self.values_list('id', flat=True)):
-            model = ct.model_class()
+        if self.query.can_filter():
+            content_type_ids = self.order_by().values_list('content_type_id', flat=True).distinct()
+        else:
+            content_type_ids = set(self.values_list('content_type_id', flat=True))
+        for ctid in content_type_ids:
+            content_type = ContentType.objects.get_for_id(ctid)
+            model = content_type.model_class()
             if model is not None:
-                model._content_type = ct
+                model._content_type = content_type
                 yield model
 
     def _get_upcast_models(self):
