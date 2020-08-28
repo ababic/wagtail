@@ -217,13 +217,13 @@ class PageQuerySet(SearchableQuerySetMixin, TreeQuerySet):
         """
         return self.exclude(self.page_q(other))
 
-    def type_q(self, *models, excluding=False):
+    def type_q(self, *models, excluding=None):
         model_set = set()
         for model in models:
             model_set.update(model.concrete_subclasses())
         if excluding:
             self._excluded_models.update(model_set)
-        else:
+        elif excluding is False:
             self._specified_models = model_set
         content_types = tuple(ContentType.objects.get_for_models(*model_set).values())
         return Q(content_type__in=content_types)
@@ -241,10 +241,10 @@ class PageQuerySet(SearchableQuerySetMixin, TreeQuerySet):
         """
         return self.exclude(self.type_q(*models, excluding=True))
 
-    def exact_type_q(self, *models, excluding=False):
+    def exact_type_q(self, *models, excluding=None):
         if excluding:
             self._excluded_models.update(models)
-        else:
+        elif excluding is False:
             self._specified_models = set(models)
         content_types = ContentType.objects.get_for_models(*models)
         return Q(content_type__in=list(content_types.values()))
