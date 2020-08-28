@@ -1213,13 +1213,6 @@ Page.settings_panels = [
 Page.base_form_class = WagtailAdminPageForm
 
 
-def get_page_edit_handler(cls, instance=None, request=None):
-    return PageTabbedInterface().bind_to(model=cls, instance=instance, request=request)
-
-
-Page.get_edit_handler = types.MethodType(get_page_edit_handler, Page)
-
-
 class StreamFieldPanel(FieldPanel):
     def classes(self):
         classes = super().classes()

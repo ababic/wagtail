@@ -944,6 +944,13 @@ class Page(MultiTableCopyMixin, AbstractPage, index.Indexed, ClusterableModel, m
 
         return revision
 
+    @classmethod
+    def get_edit_handler(cls, instance=None, request=None):
+        from wagtail.admin.edit_handlers import PageTabbedInterface
+        edit_handler = getattr(cls, 'edit_handler', None) or PageTabbedInterface()
+        return edit_handler.bind_to(model=cls, instance=instance, request=request)
+
+
     def get_latest_revision(self):
         return self.revisions.order_by('-created_at', '-id').first()
 
