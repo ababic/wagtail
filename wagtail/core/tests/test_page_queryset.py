@@ -366,9 +366,9 @@ class TestPageQuerySet(TestCase):
         homepage = Page.objects.get(url_path='/home/')
 
         # Add PageViewRestriction to events_index
-        PageViewRestriction.objects.create(page=events_index, password='hello')
+        PageViewRestriction.objects.create(page=events_index, restriction_type=PageViewRestriction.LOGIN)
 
-        with self.assertNumQueries(4):
+        with self.assertNumQueries(5):
             # Get public pages
             pages = Page.objects.public()
 
@@ -387,9 +387,9 @@ class TestPageQuerySet(TestCase):
         homepage = Page.objects.get(url_path='/home/')
 
         # Add PageViewRestriction to events_index
-        PageViewRestriction.objects.create(page=events_index, password='hello')
+        PageViewRestriction.objects.create(page=events_index, restriction_type=PageViewRestriction.LOGIN)
 
-        with self.assertNumQueries(4):
+        with self.assertNumQueries(5):
             # Get public pages
             pages = Page.objects.not_public()
 

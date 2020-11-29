@@ -9,7 +9,7 @@ from django.test.utils import override_settings
 from django.urls import reverse
 
 from wagtail.api.v2 import signal_handlers
-from wagtail.core.models import Locale, Page, Site
+from wagtail.core.models import BaseViewRestriction, Locale, Page, Site
 from wagtail.tests.demosite import models
 from wagtail.tests.testapp.models import StreamPage
 
@@ -72,7 +72,7 @@ class TestPageListing(TestCase):
         total_count = get_total_page_count()
 
         page = models.BlogIndexPage.objects.get(id=5)
-        page.view_restrictions.create(password='test')
+        page.view_restrictions.create(password='test', restriction_type=BaseViewRestriction.PASSWORD)
 
         new_total_count = get_total_page_count()
         self.assertNotEqual(total_count, new_total_count)

@@ -40,7 +40,7 @@ class TestSitemapGenerator(TestCase):
             content="hello",
             live=True,
         ))
-        PageViewRestriction.objects.create(page=self.protected_child_page, password='hello')
+        PageViewRestriction.objects.create(page=self.protected_child_page, password='hello', restriction_type=PageViewRestriction.PASSWORD)
 
         self.page_with_no_last_publish_date = self.home_page.add_child(instance=SimplePage(
             title="I have no last publish date :-(",
@@ -93,7 +93,7 @@ class TestSitemapGenerator(TestCase):
         req_protocol = request.scheme
 
         sitemap = Sitemap()
-        with self.assertNumQueries(17):
+        with self.assertNumQueries(18):
             urls = [url['location'] for url in sitemap.get_urls(1, django_site, req_protocol)]
 
         self.assertIn('http://localhost/', urls)  # Homepage
@@ -108,7 +108,7 @@ class TestSitemapGenerator(TestCase):
         # pre-seed find_for_request cache, so that it's not counted towards the query count
         Site.find_for_request(request)
 
-        with self.assertNumQueries(14):
+        with self.assertNumQueries(15):
             urls = [url['location'] for url in sitemap.get_urls(1, django_site, req_protocol)]
 
         self.assertIn('http://localhost/', urls)  # Homepage
@@ -120,7 +120,7 @@ class TestSitemapGenerator(TestCase):
         req_protocol = request.scheme
 
         sitemap = Sitemap()
-        with self.assertNumQueries(19):
+        with self.assertNumQueries(20):
             urls = [url['location'] for url in sitemap.get_urls(1, django_site, req_protocol)]
 
         self.assertIn('http://localhost/', urls)  # Homepage
@@ -136,7 +136,7 @@ class TestSitemapGenerator(TestCase):
         # pre-seed find_for_request cache, so that it's not counted towards the query count
         Site.find_for_request(request)
 
-        with self.assertNumQueries(16):
+        with self.assertNumQueries(17):
             urls = [url['location'] for url in sitemap.get_urls(1, django_site, req_protocol)]
 
         self.assertIn('http://localhost/', urls)  # Homepage
