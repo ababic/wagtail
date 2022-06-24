@@ -67,7 +67,7 @@ class Creator:
 
 
 class StreamField(models.Field):
-    def __init__(self, block_types, use_json_field=None, **kwargs):
+    def __init__(self, block_types=None, use_json_field=None, **kwargs):
         # extract kwargs that are to be passed on to the block, not handled by super
         block_opts = {}
         for arg in ["min_num", "max_num", "block_counts", "collapsed"]:
