@@ -1,6 +1,7 @@
 import json
 import warnings
 
+from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.db.models.fields.json import KeyTransform
@@ -121,8 +122,12 @@ class StreamField(models.Field):
 
     def deconstruct(self):
         name, path, _, kwargs = super().deconstruct()
-        block_types = list(self.stream_block.child_blocks.items())
-        args = [block_types]
+        args = []
+        if getattr(
+            settings, "WAGTAIL_STREAMFIELD_INCLUDE_BLOCK_TYPES_IN_MIGRATIONS", True
+        ):
+            block_types = list(self.stream_block.child_blocks.items())
+            args.append(block_types)
         kwargs["use_json_field"] = self.use_json_field
         return name, path, args, kwargs
 
