@@ -1,0 +1,158 @@
+import uuid
+
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
+from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError
+from django.db import models
+from django.utils.translation import gettext_lazy as _
+from wagtail.multitenancy.query import TenantManager, TenantQuerySet, TenantMemberQuerySet
+
+
+def get_default_tenant_id():
+    return Tenant.objects.only("id").get(is_default=True).id
+
+
+class Tenant(models.Model):
+    id = models.UUIDField(default=uuid.uuid4, primary_key=True)
+    label = models.CharField(
+        verbose_name=_("label"),
+        help_text=_("Human-readable name for the tenant."),
+        max_length=200,
+        unique=True,
+    )
+    hostname = models.CharField(
+        verbose_name=_("hostname"),
+        max_length=255,
+        db_index=True,
+        blank=True,
+        help_text=_(
+            "Optional. Set this to automatically activate the tenant based on "
+            "the hostname used to acess the Wagtail admin."
+        ),
+    )
+    port = models.IntegerField(
+        verbose_name=_("port"),
+        default=80,
+        help_text=_(
+            "Set this to something other than 80 if you need the tenant to be "
+            "recognised over others when using a different port number in URLs "
+            "(e.g. 8001)."
+        ),
+    )
+    is_default = models.BooleanField(
+        verbose_name=_("is default tenant"),
+        default=False,
+        help_text=_(
+            "Use this tenant when a more suitable one cannot be identified for "
+            "a request (or, when no request is available), and as the default "
+            "'native tenant' value for multi-tenancy compatible models."
+        ),
+    )
+    is_open = models.BooleanField(
+       verbose_name=_("is open"),
+       default=False,
+       help_text=_(
+        "Allow all Wagtail users to access this tenant without the need for "
+        "explicit approval."
+       )
+    )
+    created = models.DateTimeField(auto_now_add=True)
+    objects = TenantManager.from_queryset(TenantQuerySet)()
+
+    class Meta:
+        verbose_name = _("tenant")
+        verbose_name_plural = _("tenants")
+        get_latest_by = ["created"]
+
+    def __str__(self) -> str:
+        return self.label + (" ({})".format(_("default")) if self.is_default else "")
+
+    def clean(self):
+        super().clean()
+        errors = {}
+
+        # Only one tenant can have the `is_default` flag set to True
+        try:
+            default = Tenant.objects.get_default()
+        except Tenant.DoesNotExist:
+            pass
+        else:
+            if self.is_default and self.pk != default.pk:
+                errors["is_default"] = [
+                    _(
+                        "%(default)s is already configured as the default "
+                        "tenant. You must unset that before you can can make "
+                        "this tenant the default."
+                    )
+                    % {"default": default.label}
+                ]
+
+        # if the hostname is specified, the hostname and port combination must
+        # be unique
+        if self.hostname:
+            try:
+                existing = Tenant.objects.get(hostname=self.hostname, port=self.port)
+            except Tenant.DoesNotExist:
+                pass
+            else:
+                errors["hostname"] = [
+                    _(
+                        "%(existing)s is already using this hostname and port "
+                        "combination. When specified, the combination must be "
+                        "unique for each tenant."
+                    )
+                    % {"existing": existing}
+                ]
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, clean=True, *args, **kwargs):
+        # Apply custom validation to help prevent misconfiguration
+        # when saving outside of views (e.g. via the shell).
+        if clean:
+            self.full_clean()
+        super().save(*args, **kwargs)
+
+    @property
+    def url(self):
+        if self.port == 80:
+            return f"http://{self.hostname}"
+        elif self.port == 443:
+            return f"https://{self.hostname}"
+        return f"http://{self.hostname}:{self.port}"
+
+
+class TenantMember(models.Model):
+    """
+    Base class for models that are grouped by Tenant
+    """
+    native_tenant = models.ForeignKey(
+        Tenant,
+        default=get_default_tenant_id,
+        verbose_name=_("native tenant"),
+        on_delete=models.CASCADE,
+        related_name="+",
+        editable=False,
+    )
+    tenant_shares = GenericRelation("wagtailcore.SharedTenantMember")
+    objects = TenantMemberQuerySet.as_manager()
+
+    class Meta:
+        abstract = True
+
+    def share_with_tenant(self, recipient: Tenant, **kwargs) -> "SharedTenantMember":
+        return self.tenant_shares.create(sender=self.native_tenant, recipient=recipient, **kwargs)
+
+
+class SharedTenantMember(models.Model):
+    created = models.DateTimeField(auto_now_add=True)
+    sender = models.ForeignKey(Tenant, related_name="items_shared", on_delete=models.CASCADE)
+    recipient = models.ForeignKey(Tenant, related_name="items_shared_with", on_delete=models.CASCADE)
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.CharField(max_length=36)
+    object = GenericForeignKey('content_type', 'object_id')
+
+    class Meta:
+        get_latest_by = ["created"]
+        unique_together = ["recipient", "content_type", "object_id"]
