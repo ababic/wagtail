@@ -118,6 +118,7 @@ from .i18n import (  # noqa
     bootstrap_translatable_model,
     get_translatable_models,
 )
+from .multitenancy import SharedTenantMember, Tenant, TenantMember  # noqa
 from .sites import Site, SiteManager, SiteRootPath  # noqa
 from .view_restrictions import BaseViewRestriction
 
