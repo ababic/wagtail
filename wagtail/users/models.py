@@ -76,6 +76,9 @@ class UserProfile(TenantMember):
     def get_for_user(cls, user):
         return cls.objects.get_or_create(user=user)[0]
 
+    def grant_access_to_tenant(self, tenant, **kwargs):
+        self.user.secondary_tenants.add(tenant, **kwargs)
+
     def get_preferred_language(self):
         return self.preferred_language or get_language()
 
@@ -88,3 +91,20 @@ class UserProfile(TenantMember):
     class Meta:
         verbose_name = _("user profile")
         verbose_name_plural = _("user profiles")
+
+
+class UserSecondaryTenantAccess(models.Model):
+    created = models.DateTimeField(auto_now_add=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="secondary_tenants",
+    )
+    tenant = models.ForeignKey(
+        "wagtailcore.Tenant",
+        on_delete=models.CASCADE,
+        related_name="secondary_user_access",
+    )
+
+    class Meta:
+        unique_together = ("user", "tenant")
