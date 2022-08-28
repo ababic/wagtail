@@ -8,6 +8,7 @@ from treebeard.mp_tree import MP_Node
 
 from wagtail.query import TreeQuerySet
 from wagtail.search import index
+from wagtail.multitenancy.query import TenantMemberQuerySet, TenantScopedQuerySet
 
 from .multitenancy import Tenant, TenantMember
 from .view_restrictions import BaseViewRestriction
@@ -26,15 +27,15 @@ class CollectionQuerySet(TenantMemberQuerySet, TreeQuerySet):
             for collection in self
         ]
 
-    def shared_with_q(self, tenant: "Tenant") -> Q:
+    def shared_with_tenant_q(self, tenant: "Tenant") -> Q:
         """
         Sharing a collection with another ``Tenant`` shares that collection's
-        descendants too. So, we must override TenantMemberQuerySet.shared_with_q()
+        descendants too. So, we must override TenantMemberQuerySet.shared_with_tenant_q()
         to include those descendants.
         """
         paths_q = Q()
         for collection in self.model.objects.filter(
-            super().shared_with_q(tenant)
+            super().shared_with_tenant_q(tenant)
         ).only("path"):
             paths_q |= Q(path__startswith=collection.path)
         return paths_q
@@ -137,6 +138,14 @@ def get_root_collection_id():
     return Collection.get_first_root_node().id
 
 
+class CollectionMemberQuerySet(TenantScopedQuerySet):
+    def native_to_tenant_q(self, tenant: "Tenant") -> Q:
+        return Q(collection__in=Collection.objects.native_to(tenant))
+
+    def shared_with_tenant_q(self, tenant: "Tenant") -> Q:
+        return Q(collection__in=Collection.objects.shared_with_tenant(tenant))
+
+
 class CollectionMember(models.Model):
     """
     Base class for models that are categorised into collections
@@ -152,7 +161,15 @@ class CollectionMember(models.Model):
 
     search_fields = [
         index.FilterField("collection"),
+        index.RelatedFields(
+            "collection",
+            [
+                index.FilterField("native_tenant"),
+            ],
+        ),
     ]
+
+    objects = CollectionMemberQuerySet.as_manager()
 
     class Meta:
         abstract = True
