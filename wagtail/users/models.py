@@ -5,6 +5,7 @@ from django.conf import settings
 from django.db import models
 from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
+from wagtail.models import TenantMember
 
 
 def upload_avatar_to(instance, filename):
@@ -17,7 +18,8 @@ def upload_avatar_to(instance, filename):
     )
 
 
-class UserProfile(models.Model):
+class UserProfile(TenantMember):
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
