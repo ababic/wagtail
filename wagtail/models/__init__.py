@@ -103,6 +103,7 @@ from .collections import (  # noqa
     Collection,
     CollectionManager,
     CollectionMember,
+    CollectionMemberQuerySet,
     CollectionViewRestriction,
     GroupCollectionPermission,
     GroupCollectionPermissionManager,

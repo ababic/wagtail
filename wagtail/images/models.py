@@ -21,6 +21,8 @@ from django.utils.module_loading import import_string
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from taggit.managers import TaggableManager
+from wagtail.models.collections import CollectionMemberQuerySet
+from wagtail.models.sites import SiteMemberQuerySet
 from willow.image import Image as WillowImage
 
 from wagtail import hooks
@@ -59,7 +61,7 @@ class SourceImageIOError(IOError):
     pass
 
 
-class ImageQuerySet(SearchableQuerySetMixin, models.QuerySet):
+class ImageQuerySet(SearchableQuerySetMixin, CollectionMemberQuerySet):
     def prefetch_renditions(self, *filters):
         """
         Prefetches generated renditions for the given filters.
