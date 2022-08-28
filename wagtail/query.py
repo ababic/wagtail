@@ -5,13 +5,14 @@ from typing import Any, Dict, Iterable, Tuple
 
 from django.apps import apps
 from django.contrib.contenttypes.models import ContentType
-from django.db.models import CharField, Prefetch, Q
+from django.db.models import CharField, Prefetch, Q, QuerySet
 from django.db.models.expressions import Exists, OuterRef
 from django.db.models.functions import Cast, Length, Substr
 from django.db.models.query import BaseIterable, ModelIterable
 from treebeard.mp_tree import MP_NodeQuerySet
 
 from wagtail.models.sites import Site
+from wagtail.multitenancy.query import TenantMemberQuerySet
 from wagtail.search.queryset import SearchableQuerySetMixin
 
 
@@ -139,7 +140,7 @@ class TreeQuerySet(MP_NodeQuerySet):
         return self.exclude(self.sibling_of_q(other, inclusive))
 
 
-class PageQuerySet(SearchableQuerySetMixin, TreeQuerySet):
+class PageQuerySet(TenantMemberQuerySet, SearchableQuerySetMixin, TreeQuerySet):
     def __init__(self, *args, **kwargs):
         """Set custom instance attributes"""
         super().__init__(*args, **kwargs)
@@ -151,6 +152,25 @@ class PageQuerySet(SearchableQuerySetMixin, TreeQuerySet):
         clone = super()._clone()
         clone._defer_streamfields = self._defer_streamfields
         return clone
+
+    def shared_with_tenant_q(self, tenant: "Tenant") -> Q:
+        """
+        Overrides TenantMemberQuerySet.shared_with_tenant_q() to include pages
+        from sites that are shared with the tenant.
+        """
+        from wagtail.models import Site
+
+        return Q(
+            super().shared_with_tenant_q(tenant)
+            | Q(
+                path__startswith=(
+                    site.root_page.path
+                    for site in Site.objects.shared_with_tenant(tenant).select_related(
+                        "root_page"
+                    )
+                )
+            )
+        )
 
     def live_q(self):
         return Q(live=True)
