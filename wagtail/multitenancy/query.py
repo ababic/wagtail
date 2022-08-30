@@ -4,11 +4,13 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models
 from django.db.models import Case, Q, When
+from django.db.models.functions import Cast
 from django.http.request import HttpRequest, split_domain_port
 from django.urls import reverse_lazy
 
 from wagtail.multitenancy import cache as tenant_cache
 from wagtail.multitenancy import get_default_tenant_id
+from wagtail.utils.utils import get_original_pk_field
 
 if TYPE_CHECKING:
     from wagtail.models import Tenant
@@ -300,11 +302,32 @@ class TenantMemberQuerySet(TenantScopedQuerySet):
         return Q(native_tenant=tenant)
 
     def shared_with_tenant_q(self, tenant: "Tenant") -> Q:
-        return Q(
-            pk__in=tenant.items_shared_with.filter(
-                content_type=ContentType.objects.get_for_model(self.model)
-            ).values_list("object_id", flat=True)
+        pk_field = get_original_pk_field(self.model)
+        pks_field_name = "object_id"
+
+        # For compatibility with postgres, the 'object_id' values from the
+        # link table must be cast to the correct type (int/uuid) for
+        # the final 'id__in' filter to work
+        subquery = tenant.items_shared_with.filter(
+            content_type=ContentType.objects.get_for_model(self.model)
         )
+        if isinstance(pk_field, models.IntegerField):
+            subquery = subquery.annotate(
+                object_id_recast=Cast("object_id", models.IntegerField())
+            )
+            pks_field_name = "object_id_recast"
+        elif issubclass(pk_field, models.UUIDField):
+            subquery = subquery.annotate(
+                object_id_recast=Cast("object_id", models.UUIDField())
+            )
+            pks_field_name = "object_id_recast"
+
+        # For compatibility with search, we need to use the actual name of the
+        # primary key field instead of 'pk'
+        kwargs = {
+            f"{pk_field.attname}__in": subquery.values_list(pks_field_name, flat=True)
+        }
+        return Q(**kwargs)
 
 
 TenantMemberManager = models.Manager.from_queryset(TenantMemberQuerySet)
