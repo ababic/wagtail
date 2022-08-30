@@ -4,8 +4,18 @@ from contextlib import contextmanager
 from django.contrib.auth import get_user_model
 from django.test.testcases import assert_and_parse_html
 
+from wagtail.models import Tenant
+from wagtail.multitenancy import get_default_tenant_id
+
 
 class WagtailTestUtils:
+    @staticmethod
+    def create_default_tenant():
+        obj, created = Tenant.objects.get_or_create(
+            id=get_default_tenant_id(), defaults={"label": "Default", "is_open": True}
+        )
+        return obj
+
     @staticmethod
     def create_test_user():
         """

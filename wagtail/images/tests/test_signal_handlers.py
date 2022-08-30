@@ -4,9 +4,10 @@ from django.test import TransactionTestCase, override_settings
 from wagtail.images import get_image_model, signal_handlers
 from wagtail.images.tests.utils import get_test_image_file
 from wagtail.models import Collection
+from wagtail.test.utils.wagtail_tests import WagtailTestUtils
 
 
-class TestFilesDeletedForDefaultModels(TransactionTestCase):
+class TestFilesDeletedForDefaultModels(WagtailTestUtils, TransactionTestCase):
     """
     Because we expect file deletion to only happen once a transaction is
     successfully committed, we must run these tests using TransactionTestCase
@@ -21,15 +22,13 @@ class TestFilesDeletedForDefaultModels(TransactionTestCase):
     """
 
     def setUp(self):
+        tenant = self.create_default_tenant()
         # Required to create root collection because the TransactionTestCase
         # does not make initial data loaded in migrations available and
         # serialized_rollback=True causes other problems in the test suite.
         # ref: https://docs.djangoproject.com/en/1.10/topics/testing/overview/#rollback-emulation
         Collection.objects.get_or_create(
-            name="Root",
-            path="0001",
-            depth=1,
-            numchild=0,
+            name="Root", path="0001", depth=1, numchild=0, native_tenant=tenant
         )
 
     def test_image_file_deleted_oncommit(self):
@@ -59,6 +58,7 @@ class TestFilesDeletedForDefaultModels(TransactionTestCase):
 @override_settings(WAGTAILIMAGES_IMAGE_MODEL="tests.CustomImage")
 class TestFilesDeletedForCustomModels(TestFilesDeletedForDefaultModels):
     def setUp(self):
+        tenant = self.create_default_tenant()
         # Required to create root collection because the TransactionTestCase
         # does not make initial data loaded in migrations available and
         # serialized_rollback=True causes other problems in the test suite.
@@ -68,6 +68,7 @@ class TestFilesDeletedForCustomModels(TestFilesDeletedForDefaultModels):
             path="0001",
             depth=1,
             numchild=0,
+            native_tenant=tenant,
         )
 
         #: Sadly signal receivers only get connected when starting django.

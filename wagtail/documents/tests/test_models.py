@@ -3,7 +3,7 @@ from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.files.base import ContentFile
 from django.db import transaction
-from django.test import TestCase, TransactionTestCase
+from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.test.utils import override_settings
 
 from wagtail.documents import (
@@ -145,7 +145,7 @@ class TestDocumentFilenameProperties(TestCase):
         self.extensionless_document.file.delete()
 
 
-class TestFilesDeletedForDefaultModels(TransactionTestCase):
+class TestFilesDeletedForDefaultModels(WagtailTestUtils, TransactionTestCase):
     """
     Because we expect file deletion to only happen once a transaction is
     successfully committed, we must run these tests using TransactionTestCase
@@ -160,6 +160,7 @@ class TestFilesDeletedForDefaultModels(TransactionTestCase):
     """
 
     def setUp(self):
+        self.create_default_tenant()
         # Required to create root collection because the TransactionTestCase
         # does not make initial data loaded in migrations available and
         # serialized_rollback=True causes other problems in the test suite.
@@ -228,17 +229,7 @@ class TestDocumentValidateExtensions(TestCase):
 @override_settings(WAGTAILDOCS_DOCUMENT_MODEL="tests.CustomDocument")
 class TestFilesDeletedForCustomModels(TestFilesDeletedForDefaultModels):
     def setUp(self):
-        # Required to create root collection because the TransactionTestCase
-        # does not make initial data loaded in migrations available and
-        # serialized_rollback=True causes other problems in the test suite.
-        # ref: https://docs.djangoproject.com/en/1.10/topics/testing/overview/#rollback-emulation
-        Collection.objects.get_or_create(
-            name="Root",
-            path="0001",
-            depth=1,
-            numchild=0,
-        )
-
+        super().setUp()
         #: Sadly signal receivers only get connected when starting django.
         #: We will re-attach them here to mimic the django startup behaviour
         #: and get the signals connected to our custom model..
@@ -251,7 +242,7 @@ class TestFilesDeletedForCustomModels(TestFilesDeletedForDefaultModels):
         )
 
 
-class TestGetDocumentModel(WagtailTestUtils, TestCase):
+class TestGetDocumentModel(SimpleTestCase):
     @override_settings(WAGTAILDOCS_DOCUMENT_MODEL="tests.CustomDocument")
     def test_custom_get_document_model(self):
         """Test get_document_model with a custom document model"""
