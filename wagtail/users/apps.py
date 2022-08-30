@@ -8,3 +8,8 @@ class WagtailUsersAppConfig(AppConfig):
     verbose_name = _("Wagtail users")
     default_auto_field = "django.db.models.AutoField"
     group_viewset = "wagtail.users.views.groups.GroupViewSet"
+
+    def ready(self) -> None:
+        from wagtail.users.signal_handlers import register_signal_handlers
+
+        register_signal_handlers()

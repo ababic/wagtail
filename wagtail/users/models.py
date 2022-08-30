@@ -3,10 +3,12 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 
-from wagtail.models import TenantMember
+from wagtail.models import Tenant, TenantMember
+from wagtail.multitenancy.query import TenantMemberQuerySet
 
 
 def upload_avatar_to(instance, filename):
@@ -109,3 +111,22 @@ class UserSecondaryTenantAccess(models.Model):
 
     class Meta:
         unique_together = ("user", "tenant")
+
+
+class WagtailGroupQuerySet(TenantMemberQuerySet):
+    def shared_with_tenant_q(self, tenant: Tenant) -> Q:
+        return Q(is_global=True)
+
+
+class WagtailGroup(TenantMember):
+
+    group = models.OneToOneField(
+        "auth.Group",
+        on_delete=models.CASCADE,
+        related_name="wagtailgroup",
+        primary_key=True,
+    )
+
+    is_global = models.BooleanField(default=False)
+
+    objects = WagtailGroupQuerySet.as_manager()
