@@ -16,9 +16,12 @@ from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
 
 from wagtail.log_actions import registry as log_action_registry
+from wagtail.multitenancy.query import TenantMemberQuerySet
+
+from .multitenancy import TenantMember
 
 
-class LogEntryQuerySet(models.QuerySet):
+class LogEntryQuerySet(TenantMemberQuerySet):
     def get_user_ids(self):
         """
         Returns a set of user IDs of users who have created at least one log entry in this QuerySet
@@ -138,7 +141,7 @@ class BaseLogEntryManager(models.Manager):
         raise NotImplementedError  # must be implemented by subclass
 
 
-class BaseLogEntry(models.Model):
+class BaseLogEntry(TenantMember):
     content_type = models.ForeignKey(
         ContentType,
         models.SET_NULL,
