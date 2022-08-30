@@ -120,7 +120,13 @@ from .i18n import (  # noqa
     get_translatable_models,
 )
 from .multitenancy import SharedTenantMember, Tenant, TenantMember  # noqa
-from .sites import Site, SiteManager, SiteRootPath  # noqa
+from .sites import (
+    Site,
+    SiteManager,
+    SiteMember,
+    SiteMemberQuerySet,
+    SiteRootPath,
+)  # noqa
 from .view_restrictions import BaseViewRestriction
 
 logger = logging.getLogger("wagtail")
