@@ -14,6 +14,7 @@ from wagtail.admin import widgets
 from wagtail.admin.forms.tags import TagField
 from wagtail.models import Page
 from wagtail.utils.registry import ModelFieldRegistry
+from wagtail.multitenancy.utils import apply_active_tenant_filtering
 
 # Define a registry of form field properties to override for a given model field
 registry = ModelFieldRegistry()
@@ -87,8 +88,14 @@ def formfield_for_dbfield(db_field, **kwargs):
     overrides = registry.get(db_field)
     if overrides:
         kwargs = dict(copy.deepcopy(overrides), **kwargs)
-
-    return db_field.formfield(**kwargs)
+    field = db_field.formfield(**kwargs)
+    # apply active tenant filtering to any relationship field where
+    # the model supports it
+    if hasattr(field, "queryset"):
+        field.queryset = apply_active_tenant_filtering(
+            field.queryset, native_only=False
+        )
+    return field
 
 
 class WagtailAdminModelFormOptions(PermissionedFormOptionsMixin, ClusterFormOptions):

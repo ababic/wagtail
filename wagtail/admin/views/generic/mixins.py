@@ -1,5 +1,7 @@
 from django.conf import settings
 from django.contrib.admin.utils import quote
+from django.core.exceptions import ImproperlyConfigured
+from django.db.models import QuerySet
 from django.forms import Media
 from django.shortcuts import get_object_or_404
 from django.template.loader import render_to_string
@@ -11,6 +13,8 @@ from django.utils.translation import gettext as _
 from wagtail import hooks
 from wagtail.admin import messages
 from wagtail.models import DraftStateMixin, Locale, TranslatableMixin
+from wagtail.multitenancy import get_active_tenant
+from wagtail.multitenancy.utils import apply_active_tenant_filtering
 
 
 class HookResponseMixin:
@@ -225,3 +229,42 @@ class RevisionsRevertMixin:
         context["revision"] = self.revision
         context["action_url"] = self.get_revisions_revert_url()
         return context
+
+
+class TenantAwareMixin:
+    model = None
+    queryset = None
+    native_tenant_only = True
+    missing_method_msg_fmt = (
+        "The queryset for the %(model)s model is missing a %(method_name)s() "
+        "method implementation.If you have defined a custom QuerySet or "
+        "Manager class for %(model)s, consider subclassing "
+        "wagtail.multitenancy.query.TenantMemberQuerySet or "
+        "wagtail.multitenancy.query.TenantMemberManager, which include these "
+        "methods for you."
+    )
+
+    def setup(self, request, *args, **kwargs):
+        super().setup(request, *args, **kwargs)
+        self.active_tenant = get_active_tenant()
+
+    def get_queryset(self):
+        # Instead of calling super().get_queryset(), we copy some of the
+        # initial logic from Django's MultipleObjectMixin, because not all
+        # subclasses have an ancestor with an existing get_queryset() method
+        if self.queryset is not None:
+            queryset = self.queryset
+            if isinstance(queryset, QuerySet):
+                queryset = queryset.all()
+        elif self.model is not None:
+            queryset = self.model._default_manager.all()
+        else:
+            raise ImproperlyConfigured(
+                "%(cls)s is missing a QuerySet. Define "
+                "%(cls)s.model, %(cls)s.queryset, or override "
+                "%(cls)s.get_queryset()." % {"cls": self.__class__.__name__}
+            )
+
+        return apply_active_tenant_filtering(
+            queryset, native_only=self.native_tenant_only
+        )

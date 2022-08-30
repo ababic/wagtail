@@ -30,7 +30,13 @@ from wagtail.search.backends import get_search_backend
 from wagtail.search.index import class_is_indexed
 
 from .base import WagtailAdminTemplateMixin
-from .mixins import BeforeAfterHookMixin, HookResponseMixin, LocaleMixin, PanelMixin
+from .mixins import (
+    BeforeAfterHookMixin,
+    HookResponseMixin,
+    LocaleMixin,
+    PanelMixin,
+    TenantAwareMixin,
+)
 from .permissions import PermissionCheckedMixin
 
 if DJANGO_VERSION >= (4, 0):
@@ -68,7 +74,11 @@ else:
 
 
 class IndexView(
-    LocaleMixin, PermissionCheckedMixin, WagtailAdminTemplateMixin, BaseListView
+    LocaleMixin,
+    PermissionCheckedMixin,
+    WagtailAdminTemplateMixin,
+    TenantAwareMixin,
+    BaseListView,
 ):
     model = None
     index_url_name = None
@@ -133,23 +143,7 @@ class IndexView(
         )
 
     def get_queryset(self):
-        # Instead of calling super().get_queryset(), we copy the initial logic
-        # from Django's MultipleObjectMixin, because we need to annotate the
-        # updated_at before using it for ordering.
-        # https://github.com/django/django/blob/stable/4.1.x/django/views/generic/list.py#L22-L47
-
-        if self.queryset is not None:
-            queryset = self.queryset
-            if isinstance(queryset, models.QuerySet):
-                queryset = queryset.all()
-        elif self.model is not None:
-            queryset = self.model._default_manager.all()
-        else:
-            raise ImproperlyConfigured(
-                "%(cls)s is missing a QuerySet. Define "
-                "%(cls)s.model, %(cls)s.queryset, or override "
-                "%(cls)s.get_queryset()." % {"cls": self.__class__.__name__}
-            )
+        queryset = super().get_queryset()
 
         self.filters, queryset = self.filter_queryset(queryset)
 
@@ -356,6 +350,7 @@ class CreateView(
     PermissionCheckedMixin,
     BeforeAfterHookMixin,
     WagtailAdminTemplateMixin,
+    TenantAwareMixin,
     BaseCreateView,
 ):
     model = None
@@ -505,6 +500,7 @@ class EditView(
     PermissionCheckedMixin,
     BeforeAfterHookMixin,
     WagtailAdminTemplateMixin,
+    TenantAwareMixin,
     BaseUpdateView,
 ):
     model = None
@@ -721,6 +717,7 @@ class DeleteView(
     PermissionCheckedMixin,
     BeforeAfterHookMixin,
     WagtailAdminTemplateMixin,
+    TenantAwareMixin,
     BaseDeleteView,
 ):
     model = None
@@ -775,7 +772,7 @@ class DeleteView(
         return HttpResponseRedirect(success_url)
 
 
-class RevisionsCompareView(WagtailAdminTemplateMixin, TemplateView):
+class RevisionsCompareView(WagtailAdminTemplateMixin, TenantAwareMixin, TemplateView):
     edit_url_name = None
     history_url_name = None
     edit_label = gettext_lazy("Edit")
@@ -791,7 +788,7 @@ class RevisionsCompareView(WagtailAdminTemplateMixin, TemplateView):
         self.object = self.get_object()
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.model, pk=unquote(self.pk))
+        return get_object_or_404(self.get_queryset(), pk=unquote(self.pk))
 
     def get_edit_handler(self):
         return get_edit_handler(self.model)
@@ -875,7 +872,7 @@ class RevisionsCompareView(WagtailAdminTemplateMixin, TemplateView):
         return context
 
 
-class UnpublishView(HookResponseMixin, TemplateView):
+class UnpublishView(HookResponseMixin, TenantAwareMixin, TemplateView):
     model = None
     index_url_name = None
     edit_url_name = None
@@ -895,7 +892,7 @@ class UnpublishView(HookResponseMixin, TemplateView):
     def get_object(self, queryset=None):
         if not self.model or not issubclass(self.model, DraftStateMixin):
             raise Http404
-        return get_object_or_404(self.model, pk=unquote(self.pk))
+        return get_object_or_404(self.get_queryset(), pk=unquote(self.pk))
 
     def get_objects_to_unpublish(self):
         # Hook to allow child classes to have more objects to unpublish (e.g. page descendants)
