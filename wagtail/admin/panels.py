@@ -293,6 +293,14 @@ class Panel:
         """
         return safe_snake_case(self.heading)
 
+    def format_value_for_display(self, value):
+        """
+        Hook to allow formatting of raw field values (and other attribute values) for human-readable
+        display, depending on their type. For example, if rendering a ``RichTextField`` value,
+        you could extract the text to generate a safer display value.
+        """
+        return value
+
     class BoundPanel(Component):
         """
         A template component for a panel that has been associated with a model instance, form, and request.
