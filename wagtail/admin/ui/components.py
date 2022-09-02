@@ -9,6 +9,9 @@ class Component(metaclass=MediaDefiningClass):
     def get_context_data(self, parent_context: Mapping[str, Any]) -> Mapping[str, Any]:
         return {}
 
+    def get_template_name(self) -> str:
+        return self.template_name
+
     def render_html(self, parent_context: Mapping[str, Any] = None) -> str:
         if parent_context is None:
             parent_context = Context()
@@ -16,5 +19,5 @@ class Component(metaclass=MediaDefiningClass):
         if context_data is None:
             raise TypeError("Expected a dict from get_context_data, got None")
 
-        template = get_template(self.template_name)
+        template = get_template(self.get_template_name())
         return template.render(context_data)
