@@ -26,6 +26,7 @@
 
 <div class="w-field__wrapper {{ classname }}" data-field-wrapper>
 
+    {% block custom_label %}
     {# Render custom label attributes if provided, or the bound field’s label attributes otherwise. #}
     {% if show_label|default_if_none:True %}
         {# Add an id to the label so we can use it as a descriptor for the "Add comment" button. #}
@@ -33,11 +34,13 @@
             {% firstof label_text field.label %}{% if field.field.required %}<span class="w-required-mark">*</span>{% endif %}
         </label>
     {% endif %}
+    {% endblock custom_label %}
 
     {# It’s possible to customise the fields’ layout based on widget type. #}
     {# Customising fields based on the field type is only supported for backwards compatibility. #}
     <div class="w-field{% if field %} w-field--{{ field|fieldtype }} w-field--{{ field|widgettype }}{% endif %}{% if field.errors %} w-field--error{% endif %}{% if show_add_comment_button %} w-field--commentable{% endif %}" data-field data-contentpath="{{ field.name }}">
 
+        {% block errors %}
         {# Always associate a wrapping div with the field, so JS error rendering knows where to put error messages. #}
         <div class="w-field__errors" data-field-errors {% if error_message_id %}id="{{ error_message_id }}"{% endif %}>
             {# Avoid rendering errors here if the widget itself is taking responsibility for its error rendering. #}
@@ -48,7 +51,9 @@
                 </p>
             {% endif %}
         </div>
+        {% endblock errors %}
 
+        {% block form_field_wrapper %}
         {# Separate container for the widget with prefix icon and suffix comment button #}
         <div class="w-field__input" data-field-input>
             {% if icon %}
@@ -72,12 +77,15 @@
                 </button>
             {% endif %}
         </div>
+        {% endblock form_field_wrapper %}
 
+        {% block help %}
         <div {% if help_text_id %}id="{{ help_text_id }}"{% endif %} data-field-help>
             {% firstof help_text field.help_text as help_text_value %}
             {% if help_text_value %}
                 <div class="help">{{ help_text_value }}</div>
             {% endif %}
         </div>
+        {% endblock help %}
     </div>
 </div>
