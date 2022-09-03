@@ -598,10 +598,30 @@ class TestFieldPanel(TestCase):
             date_from=date(2014, 7, 20),
             date_to=date(2014, 7, 21),
         )
+        self.unsaved_event = EventPage(
+            title=self.event.title,
+            body=self.event.body,
+            date_from=self.event.date_from,
+            date_to=self.event.date_to,
+        )
 
         self.end_date_panel = FieldPanel(
             "date_to", classname="full-width"
         ).bind_to_model(EventPage)
+
+        self.read_only_end_date_panel = FieldPanel(
+            "date_to", read_only=True
+        ).bind_to_model(EventPage)
+
+        self.non_updatable_end_date_panel = FieldPanel(
+            "date_to", read_only_when_updating=True
+        ).bind_to_model(EventPage)
+
+        self.pontypridd_event_data = {
+            "title": "Pontypridd sheepdog trials",
+            "date_from": "2014-06-01",
+            "date_to": "2014-06-02",
+        }
 
     def test_non_model_field(self):
         # defining a FieldPanel for a field which isn't part of a model is OK,
@@ -635,32 +655,94 @@ class TestFieldPanel(TestCase):
             end_date_panel_with_overridden_heading.bound_field.label, "New heading"
         )
 
-    def test_render_html(self):
-        form = self.EventPageForm(
-            {
-                "title": "Pontypridd sheepdog trials",
-                "date_from": "2014-07-20",
-                "date_to": "2014-07-22",
-            },
-            instance=self.event,
-        )
-
+    def _render_html(self, panel: FieldPanel, instance: EventPage):
+        form = self.EventPageForm(data=self.pontypridd_event_data, instance=instance)
         form.is_valid()
-
-        field_panel = self.end_date_panel.get_bound_panel(
-            instance=self.event,
-            form=form,
-            request=self.request,
+        bound_panel = panel.get_bound_panel(
+            instance=instance, form=form, request=self.request
         )
-        result = field_panel.render_html()
+        return bound_panel.render_html()
 
-        self.assertIn("Not required if event is on a single day", result)
+    def test_render_html_for_regular_fieldpanel(self):
+        """
+        When not read only(the default), it should be possible to edit values
+        for both new and existing instances.
+        """
+        for instance in (self.event, self.unsaved_event):
+            with self.subTest(f"existing={bool(instance.pk)}"):
+                result = self._render_html(
+                    panel=self.end_date_panel,
+                    instance=instance,
+                )
 
-        # check that the populated form field is included
-        self.assertIn('value="2014-07-22"', result)
+                # the form field is rendered, and has the new, posted value
+                self.assertIn(
+                    f'value="{self.pontypridd_event_data["date_to"]}"', result
+                )
 
-        # there should be no errors on this field
-        self.assertNotIn("error-message", result)
+                # help text is rendered
+                self.assertIn("Not required if event is on a single day", result)
+
+                # there should be no errors on this field
+                self.assertNotIn("error-message", result)
+
+    def test_render_html_for_read_only_fieldpanel(self):
+        """
+        When read-only=True, it should not be possible to edit values for new
+        OR existing instances.
+        """
+        for instance in (self.event, self.unsaved_event):
+            with self.subTest(f"existing={bool(instance.pk)}"):
+                result = self._render_html(
+                    panel=self.read_only_end_date_panel,
+                    instance=instance,
+                )
+
+                # the newly supplied 'date_to' should NOT be be present as an
+                # input value
+                self.assertNotIn(self.pontypridd_event_data["date_to"], result)
+
+                # in fact, there should be no input at all
+                self.assertNotIn("<input", result)
+
+                # instead, there should be a read-only, human-readable
+                # representation of instance value
+                self.assertIn(instance.date_to.strftime("%B %-d, %Y"), result)
+
+                # help text should still be rendered
+                self.assertIn("Not required if event is on a single day", result)
+
+    def test_render_html_for_non_updatable_fieldpanel(self):
+        """
+        When read_only_when_updating=True, it should be possible to set the value for
+        a new instance, but not change the value of an existing one.
+        """
+        for instance in (self.event, self.unsaved_event):
+            with self.subTest(f"existing={bool(instance.id)}"):
+                result = self._render_html(
+                    panel=self.non_updatable_end_date_panel,
+                    instance=instance,
+                )
+
+                updated_input_value = f'value="{self.pontypridd_event_data["date_to"]}"'
+
+                if not instance.id:
+                    # the form field is rendered, and has the new, posted value
+                    self.assertIn(updated_input_value, result)
+                else:
+                    # the newly supplied 'date_to' should NOT be be present as an
+                    # input value
+                    self.assertNotIn(updated_input_value, result)
+
+                    # in fact, there should be no input at all
+                    self.assertNotIn("<input", result)
+
+                    # instead, there should be a read-only, human-readable
+                    # representation of instance value
+                    self.assertIn(instance.date_to.strftime("%B %-d, %Y"), result)
+
+                    # help text should still be rendered
+                    self.assertIn("Not required if event is on a single day", result)
 
     def test_required_fields(self):
         result = self.end_date_panel.get_form_options()["fields"]
