@@ -1,0 +1,10 @@
+@use 'sass:map';
+
+/**
+ * A container for rendering human-readable field values in forms in a way
+ that makes them 'focusable' without rendering an actual input.
+ */
+
+.w-field__textoutput {
+  position: relative;
+}

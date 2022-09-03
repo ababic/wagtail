@@ -1,0 +1,19 @@
+{% extends "wagtailadmin/shared/field.html" %}
+{% load wagtailadmin_tags i18n %}
+
+{% block form_field_wrapper %}
+    <div class="w-field w-field--textoutput">
+        <span class="w-field__label" id="{{ label_id }}">{{ label }}</span>
+        {% if icon %}
+            {% icon name=icon class_name="w-field__icon" %}
+        {% endif %}
+
+        <div class="w-field__textoutput" id="{{ container_id }}" role="textbox" tabindex="0" aria-labelledby="{{ label_id }}"{% if help_text%} aria-describedby="{{ help_text_id }}"{% endif %} aria-readonly="true">
+            {{ display_value }}
+        </div>
+    </div>
+{% endblock %}
+
+{% block custom_label %}{% endblock %}
+
+{% block errors %}{% endblock %}

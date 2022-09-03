@@ -11,6 +11,7 @@ from django.dispatch import receiver
 from django.forms import Media
 from django.forms.formsets import DELETION_FIELD_NAME, ORDERING_FIELD_NAME
 from django.forms.models import fields_for_model
+from django.forms.utils import pretty_name
 from django.utils.functional import cached_property
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy
@@ -326,6 +327,12 @@ class Panel:
             self.help_text = self.panel.help_text
 
         @property
+        def is_updating(self) -> bool:
+            return (
+                isinstance(self.instance, Page) and self.instance.id
+            ) or not self.instance._state.adding
+
+        @property
         def classname(self):
             return self.panel.classname
 
@@ -619,13 +626,22 @@ class FieldPanel(Panel):
     TEMPLATE_VAR = "field_panel"
 
     def __init__(
-        self, field_name, widget=None, disable_comments=None, permission=None, **kwargs
+        self,
+        field_name,
+        widget=None,
+        disable_comments=None,
+        permission=None,
+        read_only=False,
+        read_only_when_updating=False,
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.field_name = field_name
         self.widget = widget
         self.disable_comments = disable_comments
         self.permission = permission
+        self.read_only = read_only
+        self.read_only_when_updating = read_only_when_updating
 
     def clone_kwargs(self):
         kwargs = super().clone_kwargs()
@@ -634,10 +650,15 @@ class FieldPanel(Panel):
             widget=self.widget,
             disable_comments=self.disable_comments,
             permission=self.permission,
+            read_only=self.read_only,
+            read_only_when_updating=self.read_only_when_updating,
         )
         return kwargs
 
     def get_form_options(self):
+        if self.read_only:
+            return {}
+
         opts = {
             "fields": [self.field_name],
         }
@@ -695,20 +716,41 @@ class FieldPanel(Panel):
 
     class BoundPanel(Panel.BoundPanel):
         template_name = "wagtailadmin/panels/field_panel.html"
+        read_only_template_name = "wagtailadmin/panels/read_only_field_panel.html"
 
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
 
             if self.form is None:
-                self.bound_field = None
                 return
 
             try:
                 self.bound_field = self.form[self.field_name]
             except KeyError:
                 self.bound_field = None
+
+            if self.read_only:
+
+                # Ensure heading and help_text are set to something useful
+                self.heading = self.panel.heading or self.form_field.label
+                self.help_text = self.panel.help_text or self.form_field.help_text
+
+                # Remove the field from the form, if present
+                # Doing this here is less than ideal, but it is the first place
+                # we can really determine the fields neccessity
+                try:
+                    del self.form.fields[self.field_name]
+                    del self.form._bound_fields_cache[self.field_name]
+                except KeyError:
+                    pass
                 return
 
+            # Editable panel setup happens from here...
+            if not self.bound_field:
+                return None
+
+            # Ensure heading and help_text are consistant accross
+            # Panel, BoundPanel and Field
             if self.panel.heading:
                 self.heading = self.bound_field.label = self.panel.heading
             else:
@@ -719,6 +761,20 @@ class FieldPanel(Panel):
         @property
         def field_name(self):
             return self.panel.field_name
+
+        @cached_property
+        def form_field(self):
+            try:
+                return self.bound_field.field
+            except AttributeError:
+                pass
+            return self.panel.db_field.formfield()
+
+        @property
+        def read_only(self) -> bool:
+            return self.panel.read_only or (
+                self.panel.read_only_when_updating and self.is_updating
+            )
 
         def is_shown(self):
             if self.form is not None and self.bound_field is None:
@@ -735,22 +791,28 @@ class FieldPanel(Panel):
             return True
 
         def is_required(self):
+            if self.read_only:
+                return False
             return self.bound_field.field.required
 
         def classes(self):
-            is_streamfield = isinstance(self.bound_field.field, BlockField)
-            extra_classes = ["w-panel--nested"] if is_streamfield else []
-
-            return self.panel.classes() + extra_classes
+            classes = self.panel.classes()
+            if self.bound_field and isinstance(self.bound_field.field, BlockField):
+                classes.append("w-panel--nested")
+            return classes
 
         @property
         def icon(self):
             """
             Display a different icon depending on the field’s type.
             """
+            if self.panel.icon:
+                return self.panel.icon
+
             field_icons = {
                 # Icons previously-defined as StreamField block icons.
                 # Commented out until they can be reviewed for appropriateness in this new context.
+                # Also, maybe we should also match subclasses too?
                 # "DateField": "date",
                 # "TimeField": "time",
                 # "DateTimeField": "date",
@@ -763,9 +825,7 @@ class FieldPanel(Panel):
                 # "RegexField": "code",
                 # "BooleanField": "tick-inverse",
             }
-            field_type = self.bound_field.field.__class__.__name__
-
-            return self.panel.icon or field_icons.get(field_type, None)
+            return field_icons.get(self.form_field.__class__.__name__, None)
 
         def id_for_label(self):
             return self.bound_field.id_for_label
@@ -778,15 +838,23 @@ class FieldPanel(Panel):
             else:
                 return not self.panel.disable_comments
 
+        @cached_property
+        def value_from_instance(self):
+            return getattr(self.instance, self.field_name)
+
         def get_context_data(self, parent_context=None):
             context = super().get_context_data(parent_context)
+            if self.read_only:
+                return self.get_read_only_context_data(context)
+            return self.get_editable_context_data(context)
 
-            widget_described_by_ids = []
-            help_text = self.bound_field.help_text
+        def get_editable_context_data(self, base_context):
+            context = base_context
+
             help_text_id = "%s-helptext" % self.prefix
             error_message_id = "%s-errors" % self.prefix
-
-            if help_text:
+            widget_described_by_ids = []
+            if self.help_text:
                 widget_described_by_ids.append(help_text_id)
 
             if self.bound_field.errors:
@@ -825,16 +893,40 @@ class FieldPanel(Panel):
                 {
                     "field": self.bound_field,
                     "rendered_field": rendered_field,
-                    "help_text": help_text,
-                    "help_text_id": help_text_id,
                     "error_message_id": error_message_id,
+                    "help_text": self.help_text,
+                    "help_text_id": help_text_id,
                     "show_add_comment_button": self.comments_enabled
                     and getattr(
-                        self.bound_field.field.widget, "show_add_comment_button", True
+                        self.bound_field.field.widget,
+                        "show_add_comment_button",
+                        True,
                     ),
                 }
             )
             return context
+
+        def get_read_only_context_data(self, base_context):
+            context = base_context
+            context.update(
+                {
+                    "label": self.heading,
+                    "label_id": "%s-label" % self.prefix,
+                    "container_id": "%s-value" % self.prefix,
+                    "raw_value": self.value_from_instance,
+                    "display_value": self.panel.format_value_for_display(
+                        self.value_from_instance
+                    ),
+                    "help_text": self.help_text,
+                    "help_text_id": "%s-helptext" % self.prefix,
+                }
+            )
+            return context
+
+        def get_template_name(self):
+            if self.read_only:
+                return self.read_only_template_name
+            return self.template_name
 
         def get_comparison(self):
             comparator_class = self.panel.get_comparison_class()
