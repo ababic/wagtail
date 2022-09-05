@@ -15,6 +15,7 @@ from pytz import utc
 
 from wagtail.admin.forms import WagtailAdminModelForm, WagtailAdminPageForm
 from wagtail.admin.panels import (
+    AttributeValuePanel,
     CommentPanel,
     FieldPanel,
     FieldRowPanel,
@@ -768,6 +769,116 @@ class TestFieldPanel(TestCase):
         result = field_panel.render_html()
 
         self.assertIn("Enter a valid date.", result)
+
+    def test_repr(self):
+        form = self.EventPageForm()
+        field_panel = self.end_date_panel.get_bound_panel(
+            form=form,
+            instance=self.event,
+            request=self.request,
+        )
+
+        field_panel_repr = repr(field_panel)
+
+        self.assertIn(
+            "model=<class 'wagtail.test.testapp.models.EventPage'>", field_panel_repr
+        )
+        self.assertIn("instance=Abergavenny sheepdog trials", field_panel_repr)
+        self.assertIn("request=<WSGIRequest: GET '/'>", field_panel_repr)
+        self.assertIn("form=EventPageForm", field_panel_repr)
+
+
+class TestAttributeValuePanel(TestCase):
+    def setUp(self):
+        self.request = RequestFactory().get("/")
+        user = AnonymousUser()  # technically, Anonymous users cannot access the admin
+        self.request.user = user
+
+        self.EventPageForm = get_form_for_model(
+            EventPage,
+            form_class=WagtailAdminPageForm,
+            fields=["title", "slug", "date_from", "date_to"],
+            formsets=[],
+        )
+        self.event = EventPage(
+            title="Abergavenny sheepdog trials",
+            date_from=date(2014, 7, 20),
+            date_to=date(2014, 7, 21),
+        )
+
+        self.end_date_panel = AttributeValuePanel("date_to", classname="full-width")
+
+    def _get_boundpanel(
+        self, panel: AttributeValuePanel, instance: EventPage
+    ) -> AttributeValuePanel.BoundPanel:
+        form = self.EventPageForm(data=self.pontypridd_event_data, instance=instance)
+        form.is_valid()
+        return panel.get_bound_panel(instance=instance, form=form, request=self.request)
+
+    def test_heading(self):
+        # When no 'heading' is specified for the panel, the boundpanel should
+        # generate a heading from 'attribute_name' (it does not go looking for
+        # potential 'verbose_name' values from model fields)
+        bound_panel = self._get_boundpanel(panel=self.end_date_panel)
+        self.assertEqual(bound_panel.heading, "Date to")
+
+        # if 'heading' is explicitly provided to constructor, that value should
+        # be used instead
+        bound_panel = self._get_boundpanel(
+            panel=AttributeValuePanel(
+                "date_to",
+                heading="My custom heading",
+            )
+        )
+        self.assertEqual(bound_panel.heading, "My custom heading")
+
+    def test_help_text(self):
+        # When no 'help_text' value is specified for a panel, the boundpanel
+        # should not have one either. (it does not go looking for potential
+        # 'help_text' values on model fields)
+        bound_panel = self._get_boundpanel(panel=self.end_date_panel)
+        self.assertIsNone(bound_panel.help_text)
+
+        # if 'help_text' is explicitly provided to constructor, that value
+        # should be used instead
+        bound_panel = self._get_boundpanel(
+            panel=AttributeValuePanel(
+                "date_to",
+                help_text="My custom help text",
+            )
+        )
+        self.assertEqual(bound_panel.heading, "My custom help text")
+
+    def test_value_from_instance(self):
+        boundpanel = self._get_boundpanel(self.end_date_panel)
+        self.assertEqual(boundpanel.value_from_instance, self.instance.date_to)
+
+        # Callables should be called to get the return value
+        boundpanel = self._get_boundpanel(
+            AttributeValuePanel("get_admin_display_title")
+        )
+        self.assertEqual(boundpanel.value_from_instance, "Abergavenny sheepdog trials")
+
+        # Properties and cached properties should work too
+        boundpanel = self._get_boundpanel(AttributeValuePanel("specific_class"))
+        self.assertIs(boundpanel.value_from_instance, EventPage)
+
+        # Attributes / relationships can be spanned using '.' notation
+        boundpanel = self._get_boundpanel(
+            AttributeValuePanel("content_type.app_label.upper")
+        )
+        self.assertIs(boundpanel.value_from_instance, "TESTAPP")
+
+        # Callables (like 'upper' used above) are only called if they
+        # are the last segment in a '.' separated attribute name
+        boundpanel = self._get_boundpanel(AttributeValuePanel("get_parent.title"))
+        with self.assertRaises(AttributeError):
+            boundpanel.value_from_instance
+
+    def test_render_html(self):
+        boundpanel = self._get_boundpanel(self.end_date_panel)
+        result = boundpanel.render_html()
+        self.assertTrue(result)
 
     def test_repr(self):
         form = self.EventPageForm()
