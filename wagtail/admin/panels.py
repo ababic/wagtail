@@ -14,6 +14,7 @@ from django.forms.models import fields_for_model
 from django.forms.utils import pretty_name
 from django.utils.functional import cached_property
 from django.utils.safestring import mark_safe
+from django.utils.text import capfirst
 from django.utils.translation import gettext_lazy
 from modelcluster.models import get_serializable_data_for_fields
 
@@ -942,6 +943,137 @@ class FieldPanel(Panel):
             return "<%s '%s' with model=%s instance=%s request=%s form=%s>" % (
                 self.__class__.__name__,
                 self.field_name,
+                self.panel.model,
+                self.instance,
+                self.request,
+                self.form.__class__.__name__,
+            )
+
+
+class AttributeValuePanel(Panel):
+    TEMPLATE_VAR = "attribute_value_panel"
+
+    def __init__(
+        self,
+        attribute_name,
+        disable_comments=False,
+        permission=None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.attribute_name = attribute_name
+        self.disable_comments = disable_comments
+        self.permission = permission
+
+    def clone_kwargs(self):
+        kwargs = super().clone_kwargs()
+        kwargs.update(
+            attribute_name=self.attribute_name,
+            disable_comments=self.disable_comments,
+            permission=self.permission,
+        )
+        return kwargs
+
+    @property
+    def clean_name(self):
+        return self.attribute_name
+
+    def __repr__(self):
+        return "<%s '%s' with model=%s>" % (
+            self.__class__.__name__,
+            self.attribute_name,
+            self.model,
+        )
+
+    class BoundPanel(Panel.BoundPanel):
+        template_name = "wagtailadmin/panels/read_only_field_panel.html"
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.heading = self.panel.heading or capfirst(pretty_name(self.field_name))
+            self.help_text = self.panel.help_text
+
+        @property
+        def attribute_name(self):
+            return self.panel.attribute_name
+
+        def is_shown(self):
+            if (
+                self.panel.permission
+                and self.request
+                and not self.request.user.has_perm(self.panel.permission)
+            ):
+                return False
+
+            return True
+
+        def is_required(self):
+            return False
+
+        def classes(self):
+            return self.panel.classes()
+
+        @property
+        def icon(self):
+            """
+            Display a different icon depending on the field’s type.
+            """
+            if self.panel.icon:
+                return self.panel.icon
+
+            value_type_icons = (
+                # Icons previously-defined as StreamField block icons.
+                # Commented out until they can be reviewed for appropriateness in this new context.
+                # ((datetime.date. datetime.datetime), "date"),
+                # ((datetime.time), "time"),
+                # ((int, float, decimal.Decimal), "plus-inverse"),
+                # ((bool), "tick-inverse"),
+            )
+            for types, icon in value_type_icons:
+                if isinstance(self.value_from_instance, types):
+                    return icon
+
+        def id_for_label(self):
+            if self.prefix:
+                return f"id_{self.prefix}_{self.attribute_name}"
+            return f"id_{self.attribute_name}"
+
+        @property
+        def comments_enabled(self):
+            return not self.panel.disable_comments
+
+        @cached_property
+        def value_from_instance(self):
+            source = self.instance
+            # Split on "." to traverse object attributes
+            for attr in self.attribute_name.split("."):
+                source = getattr(source, attr)
+            # Call methods to retrieve values
+            if callable(source):
+                return source()
+            return source
+
+        def get_context_data(self, parent_context=None):
+            context = super().get_context_data(parent_context)
+            context.update(
+                {
+                    "label": self.heading,
+                    "label_id": "%s-label" % self.id_for_label(),
+                    "container_id": "%s-value" % self.prefix,
+                    "raw_value": self.value_from_instance,
+                    "display_value": self.panel.format_value_for_display(
+                        self.value_from_instance
+                    ),
+                    "help_text": self.help_text,
+                    "help_text_id": "%s-helptext" % self.prefix,
+                }
+            )
+            return context
+
+        def __repr__(self):
+            return "<%s '%s' with model=%s instance=%s request=%s form=%s>" % (
+                self.__class__.__name__,
+                self.attribute_name,
                 self.panel.model,
                 self.instance,
                 self.request,
