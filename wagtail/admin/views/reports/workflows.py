@@ -136,7 +136,11 @@ class WorkflowView(ReportView):
         )
 
     def get_queryset(self):
-        pages = UserPagePermissionsProxy(self.request.user).editable_pages()
+        pages = (
+            UserPagePermissionsProxy(self.request.user)
+            .editable_pages()
+            .native_to_active_tenant()
+        )
         return WorkflowState.objects.filter(page__in=pages).order_by("-created_at")
 
 
@@ -173,7 +177,11 @@ class WorkflowTasksView(ReportView):
         )
 
     def get_queryset(self):
-        pages = UserPagePermissionsProxy(self.request.user).editable_pages()
+        pages = (
+            UserPagePermissionsProxy(self.request.user)
+            .editable_pages()
+            .native_to_active_tenant()
+        )
         return TaskState.objects.filter(workflow_state__page__in=pages).order_by(
             "-started_at"
         )

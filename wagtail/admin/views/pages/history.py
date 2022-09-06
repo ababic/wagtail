@@ -197,6 +197,8 @@ class PageHistoryView(ReportView):
         return context
 
     def get_queryset(self):
-        return PageLogEntry.objects.filter(page=self.page).select_related(
-            "revision", "user", "user__wagtail_userprofile"
+        return (
+            PageLogEntry.objects.filter(page=self.page)
+            .native_to_active_tenant()
+            .select_related("revision", "user", "user__wagtail_userprofile")
         )

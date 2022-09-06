@@ -79,7 +79,7 @@ class LogEntryQuerySet(TenantMemberQuerySet):
 
 class BaseLogEntryManager(models.Manager):
     def get_queryset(self):
-        return LogEntryQuerySet(self.model, using=self._db)
+        return LogEntryQuerySet(self.model, using=self._db).native_to_active_tenant()
 
     def get_instance_title(self, instance):
         return str(instance)

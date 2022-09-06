@@ -71,7 +71,7 @@ class FormPagesListView(SafePaginateListView):
 
     def get_queryset(self):
         """Return the queryset of form pages for this view"""
-        queryset = get_forms_for_user(self.request.user)
+        queryset = get_forms_for_user(self.request.user).native_to_active_tenant()
         if self.locale:
             queryset = queryset.filter(locale=self.locale)
         ordering = self.get_ordering()
@@ -147,10 +147,17 @@ class DeleteSubmissionsView(TemplateView):
         """Check permissions, set the page and submissions, handle delete"""
         page_id = kwargs.get("page_id")
 
-        if not get_forms_for_user(self.request.user).filter(id=page_id).exists():
+        if (
+            not get_forms_for_user(self.request.user)
+            .native_to_active_tenant()
+            .filter(id=page_id)
+            .exists()
+        ):
             raise PermissionDenied
 
-        self.page = get_object_or_404(Page, id=page_id).specific
+        self.page = get_object_or_404(
+            Page.objects.native_to_active_tenant(), id=page_id
+        ).specific
 
         self.submissions = self.get_queryset()
 
@@ -194,7 +201,12 @@ class SubmissionsListView(SpreadsheetExportMixin, SafePaginateListView):
 
         self.form_page = kwargs.get("form_page")
 
-        if not get_forms_for_user(request.user).filter(pk=self.form_page.id).exists():
+        if (
+            not get_forms_for_user(request.user)
+            .native_to_active_tenant()
+            .filter(pk=self.form_page.id)
+            .exists()
+        ):
             raise PermissionDenied
 
         self.is_export = self.request.GET.get("export") in self.FORMATS

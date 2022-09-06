@@ -40,6 +40,7 @@ class LockedPagesView(PageReportView):
                 UserPagePermissionsProxy(self.request.user).editable_pages()
                 | Page.objects.filter(locked_by=self.request.user)
             )
+            .native_to_active_tenant()
             .filter(locked=True)
             .specific(defer=True)
         )

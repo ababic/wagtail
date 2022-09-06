@@ -17,7 +17,7 @@ def register_admin_urls():
 class FormsMenuItem(MenuItem):
     def is_shown(self, request):
         # show this only if the user has permission to retrieve submissions for at least one form
-        return get_forms_for_user(request.user).exists()
+        return get_forms_for_user(request.user).native_to_active_tenant().exists()
 
 
 @hooks.register("register_admin_menu_item")

@@ -29,7 +29,7 @@ class SiteSwitchForm(forms.Form):
                     else site.hostname
                 ),
             )
-            for site in Site.objects.all()
+            for site in Site.objects.native_to_active_tenant()
         ]
 
     @classmethod

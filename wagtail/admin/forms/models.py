@@ -13,8 +13,8 @@ from taggit.managers import TaggableManager
 from wagtail.admin import widgets
 from wagtail.admin.forms.tags import TagField
 from wagtail.models import Page
-from wagtail.utils.registry import ModelFieldRegistry
 from wagtail.multitenancy.utils import apply_active_tenant_filtering
+from wagtail.utils.registry import ModelFieldRegistry
 
 # Define a registry of form field properties to override for a given model field
 registry = ModelFieldRegistry()
