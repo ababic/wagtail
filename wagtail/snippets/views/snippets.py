@@ -40,6 +40,7 @@ from wagtail.log_actions import log
 from wagtail.log_actions import registry as log_registry
 from wagtail.models import DraftStateMixin, Locale, PreviewableMixin, RevisionMixin
 from wagtail.models.audit_log import ModelLogEntry
+from wagtail.multitenancy.utils import apply_active_tenant_filtering
 from wagtail.permissions import ModelPermissionPolicy
 from wagtail.snippets.action_menu import SnippetActionMenu
 from wagtail.snippets.models import get_snippet_models
@@ -610,7 +611,8 @@ class History(ReportView):
         super().setup(request, *args, **kwargs)
 
     def get_object(self):
-        object = get_object_or_404(self.model, pk=unquote(self.pk))
+        qs = apply_active_tenant_filtering(self.model._default_manager.all())
+        object = get_object_or_404(qs, pk=unquote(self.pk))
         if isinstance(object, DraftStateMixin):
             return object.get_latest_revision_as_object()
         return object

@@ -16,6 +16,7 @@ from wagtail.admin.menu import Menu
 from wagtail.admin.panels import ObjectList, extract_panel_definitions_from_model_class
 from wagtail.coreutils import accepts_kwarg
 from wagtail.models import Page, TranslatableMixin
+from wagtail.multitenancy.utils import apply_active_tenant_filtering
 from wagtail.utils.deprecation import RemovedInWagtail50Warning
 
 from .helpers import (
@@ -308,7 +309,9 @@ class ModelAdmin(WagtailRegisterable):
             qs = qs.order_by(*ordering)
         if self.is_pagemodel:
             # If we're listing pages, exclude the root page
-            qs = qs.exclude(depth=1)
+            qs = qs.exclude(depth=1).native_to_active_tenant()
+        else:
+            qs = apply_active_tenant_filtering(qs)
         return qs
 
     def get_search_fields(self, request):

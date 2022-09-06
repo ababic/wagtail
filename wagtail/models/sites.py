@@ -10,6 +10,11 @@ from django.db.models.functions import Lower
 from django.http.request import split_domain_port
 from django.utils.translation import gettext_lazy as _
 
+from wagtail.multitenancy.query import TenantMemberQuerySet, TenantScopedQuerySet
+from wagtail.search import index
+
+from .multitenancy import Tenant, TenantMember
+
 MATCH_HOSTNAME_PORT = 0
 MATCH_HOSTNAME_DEFAULT = 1
 MATCH_DEFAULT = 2
@@ -61,18 +66,24 @@ def get_site_for_hostname(hostname, port):
     raise Site.DoesNotExist()
 
 
-class SiteManager(models.Manager):
+class SiteQuerySet(TenantMemberQuerySet):
+    pass
+
+
+class BaseSiteManager(models.Manager):
     def get_queryset(self):
-        return super(SiteManager, self).get_queryset().order_by(Lower("hostname"))
+        return super().get_queryset().order_by(Lower("hostname"))
 
     def get_by_natural_key(self, hostname, port):
         return self.get(hostname=hostname, port=port)
 
 
+SiteManager = BaseSiteManager.from_queryset(SiteQuerySet)
+
 SiteRootPath = namedtuple("SiteRootPath", "site_id root_path root_url language_code")
 
 
-class Site(models.Model):
+class Site(TenantMember):
     hostname = models.CharField(
         verbose_name=_("hostname"), max_length=255, db_index=True
     )
@@ -248,3 +259,44 @@ class Site(models.Model):
             cache.set("wagtail_site_root_paths", result, 3600)
 
         return result
+
+
+def get_default_site_id():
+    return Site.objects.all().only("id").order_by("is_default_site", "id").get().id
+
+
+class SiteMemberQuerySet(TenantScopedQuerySet):
+    def native_to_tenant_q(self, tenant: Tenant) -> Q:
+        return Q(site__in=Site.objects.native_to(tenant))
+
+    def shared_with_tenant_q(self, tenant: Tenant) -> Q:
+        return Q(site__in=Site.objects.shared_with_tenant(tenant))
+
+
+class SiteMember(models.Model):
+    """
+    Base class for models that are categorised by site
+    """
+
+    site = models.ForeignKey(
+        Site,
+        default=get_default_site_id,
+        verbose_name=_("site"),
+        related_name="+",
+        on_delete=models.CASCADE,
+    )
+
+    search_fields = [
+        index.FilterField("site"),
+        index.RelatedFields(
+            "site",
+            [
+                index.FilterField("native_tenant"),
+            ],
+        ),
+    ]
+
+    objects = SiteMemberQuerySet.as_manager()
+
+    class Meta:
+        abstract = True

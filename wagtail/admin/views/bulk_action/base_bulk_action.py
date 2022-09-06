@@ -8,6 +8,8 @@ from django.views.generic import FormView
 from wagtail import hooks
 from wagtail.admin import messages
 from wagtail.admin.views.pages.utils import get_valid_next_url_from_request
+from wagtail.models import CollectionMember, SiteMember, TenantMember
+from wagtail.multitenancy import get_active_tenant
 
 
 class BulkAction(ABC, FormView):
@@ -34,6 +36,10 @@ class BulkAction(ABC, FormView):
     form_class = forms.Form
     cleaned_form = None
 
+    def setup(self, *args, **kwargs) -> None:
+        self.active_tenant = get_active_tenant()
+        return super().setup(*args, **kwargs)
+
     def __init__(self, request, model):
         self.request = request
         next_url = get_valid_next_url_from_request(request)
@@ -52,9 +58,20 @@ class BulkAction(ABC, FormView):
 
     @classmethod
     def get_queryset(cls, model, object_ids):
-        return get_list_or_404(model, pk__in=object_ids)
+        qs = model.objects.all()
+        if issubclass(model, CollectionMember):
+            qs = qs.select_related("collection")
+        if issubclass(model, SiteMember):
+            qs = qs.select_related("site")
+        return get_list_or_404(qs, pk__in=object_ids)
 
     def check_perm(self, obj):
+        if isinstance(obj, TenantMember):
+            return obj.native_tenant_id == self.active_tenant.id
+        if isinstance(obj, CollectionMember):
+            return obj.collection.native_tenant_id == self.active_tenant.id
+        if isinstance(obj, SiteMember):
+            return obj.site.native_tenant_id == self.active_tenant.id
         return True
 
     @classmethod

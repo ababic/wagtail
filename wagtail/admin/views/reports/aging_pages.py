@@ -80,6 +80,7 @@ class AgingPagesView(PageReportView):
             UserPagePermissionsProxy(self.request.user)
             .publishable_pages()
             .exclude(last_published_at__isnull=True)
+            .native_to_active_tenant()
             .prefetch_workflow_states()
             .select_related("content_type")
             .annotate_approved_schedule()

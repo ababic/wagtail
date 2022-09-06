@@ -74,6 +74,7 @@ from wagtail.fields import StreamField
 from wagtail.forms import TaskStateCommentForm
 from wagtail.locks import BasicLock, ScheduledForPublishLock, WorkflowLock
 from wagtail.log_actions import log
+from wagtail.multitenancy import get_default_tenant_id
 from wagtail.query import PageQuerySet
 from wagtail.search import index
 from wagtail.signals import (
@@ -103,6 +104,7 @@ from .collections import (  # noqa
     Collection,
     CollectionManager,
     CollectionMember,
+    CollectionMemberQuerySet,
     CollectionViewRestriction,
     GroupCollectionPermission,
     GroupCollectionPermissionManager,
@@ -118,7 +120,14 @@ from .i18n import (  # noqa
     bootstrap_translatable_model,
     get_translatable_models,
 )
-from .sites import Site, SiteManager, SiteRootPath  # noqa
+from .multitenancy import SharedTenantMember, Tenant, TenantMember  # noqa
+from .sites import (
+    Site,
+    SiteManager,
+    SiteMember,
+    SiteMemberQuerySet,
+    SiteRootPath,
+)  # noqa
 from .view_restrictions import BaseViewRestriction
 
 logger = logging.getLogger("wagtail")
@@ -815,6 +824,7 @@ class LockableMixin(models.Model):
 
 
 class AbstractPage(
+    TenantMember,
     LockableMixin,
     PreviewableMixin,
     DraftStateMixin,
@@ -858,6 +868,16 @@ class Page(AbstractPage, index.Indexed, ClusterableModel, metaclass=PageBase):
         on_delete=models.SET(get_default_page_content_type),
     )
     url_path = models.TextField(verbose_name=_("URL path"), blank=True, editable=False)
+    # Overrides TenantMember.native_tenant to use on_delete=SET_NULL
+    native_tenant = models.ForeignKey(
+        Tenant,
+        default=get_default_tenant_id,
+        verbose_name=_("native tenant"),
+        on_delete=models.SET_NULL,
+        related_name="+",
+        editable=False,
+        null=True,
+    )
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         verbose_name=_("owner"),
@@ -914,6 +934,7 @@ class Page(AbstractPage, index.Indexed, ClusterableModel, metaclass=PageBase):
     search_fields = [
         index.SearchField("title", partial_match=True, boost=2),
         index.AutocompleteField("title"),
+        index.FilterField("native_tenant"),
         index.FilterField("title"),
         index.FilterField("id"),
         index.FilterField("live"),

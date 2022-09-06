@@ -45,6 +45,7 @@ from wagtail.admin.views.mixins import SpreadsheetExportMixin
 from wagtail.log_actions import log
 from wagtail.log_actions import registry as log_registry
 from wagtail.models import Locale, RevisionMixin, TranslatableMixin
+from wagtail.multitenancy.utils import apply_active_tenant_filtering
 from wagtail.utils.deprecation import RemovedInWagtail50Warning
 
 from .forms import ParentChooserForm
@@ -286,8 +287,8 @@ class InstanceSpecificView(WMABaseView):
         self.pk_quoted = quote(self.instance_pk)
         filter_kwargs = {}
         filter_kwargs[self.pk_attname] = self.instance_pk
-        object_qs = model_admin.model._default_manager.get_queryset().filter(
-            **filter_kwargs
+        object_qs = apply_active_tenant_filtering(
+            model_admin.model._default_manager.get_queryset().filter(**filter_kwargs)
         )
         self.instance = get_object_or_404(object_qs)
 
@@ -740,7 +741,9 @@ class CreateView(ModelFormView):
     def dispatch(self, request, *args, **kwargs):
         if self.is_pagemodel:
             user = request.user
-            parents = self.permission_helper.get_valid_parent_pages(user)
+            parents = self.permission_helper.get_valid_parent_pages(
+                user
+            ).native_to_active_tenant()
             parent_count = parents.count()
 
             # There's only one available parent for this page type for this

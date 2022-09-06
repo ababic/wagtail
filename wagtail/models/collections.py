@@ -1,17 +1,20 @@
 from django.contrib.auth.models import Group, Permission
 from django.db import models
+from django.db.models import Q
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from treebeard.mp_tree import MP_Node
 
+from wagtail.multitenancy.query import TenantMemberQuerySet, TenantScopedQuerySet
 from wagtail.query import TreeQuerySet
 from wagtail.search import index
 
+from .multitenancy import Tenant, TenantMember
 from .view_restrictions import BaseViewRestriction
 
 
-class CollectionQuerySet(TreeQuerySet):
+class CollectionQuerySet(TenantMemberQuerySet, TreeQuerySet):
     def get_indented_choices(self):
         """
         Return a list of (id, label) tuples for use as a list of choices in a collection chooser
@@ -23,6 +26,19 @@ class CollectionQuerySet(TreeQuerySet):
             (collection.pk, collection.get_indented_name(min_depth, html=True))
             for collection in self
         ]
+
+    def shared_with_tenant_q(self, tenant: "Tenant") -> Q:
+        """
+        Sharing a collection with another ``Tenant`` shares that collection's
+        descendants too. So, we must override TenantMemberQuerySet.shared_with_tenant_q()
+        to include those descendants.
+        """
+        paths_q = Q()
+        for collection in self.model.objects.filter(
+            super().shared_with_tenant_q(tenant)
+        ).only("path"):
+            paths_q |= Q(path__startswith=collection.path)
+        return paths_q
 
 
 class BaseCollectionManager(models.Manager):
@@ -48,7 +64,7 @@ class CollectionViewRestriction(BaseViewRestriction):
         verbose_name_plural = _("collection view restrictions")
 
 
-class Collection(MP_Node):
+class Collection(TenantMember, MP_Node):
     """
     A location in which resources such as images and documents can be grouped
     """
@@ -122,6 +138,14 @@ def get_root_collection_id():
     return Collection.get_first_root_node().id
 
 
+class CollectionMemberQuerySet(TenantScopedQuerySet):
+    def native_to_tenant_q(self, tenant: "Tenant") -> Q:
+        return Q(collection__in=Collection.objects.native_to(tenant))
+
+    def shared_with_tenant_q(self, tenant: "Tenant") -> Q:
+        return Q(collection__in=Collection.objects.shared_with_tenant(tenant))
+
+
 class CollectionMember(models.Model):
     """
     Base class for models that are categorised into collections
@@ -137,7 +161,15 @@ class CollectionMember(models.Model):
 
     search_fields = [
         index.FilterField("collection"),
+        index.RelatedFields(
+            "collection",
+            [
+                index.FilterField("native_tenant"),
+            ],
+        ),
     ]
+
+    objects = CollectionMemberQuerySet.as_manager()
 
     class Meta:
         abstract = True

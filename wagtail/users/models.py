@@ -3,8 +3,12 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
+
+from wagtail.models import Tenant, TenantMember
+from wagtail.multitenancy.query import TenantMemberQuerySet
 
 
 def upload_avatar_to(instance, filename):
@@ -17,7 +21,8 @@ def upload_avatar_to(instance, filename):
     )
 
 
-class UserProfile(models.Model):
+class UserProfile(TenantMember):
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -74,6 +79,9 @@ class UserProfile(models.Model):
     def get_for_user(cls, user):
         return cls.objects.get_or_create(user=user)[0]
 
+    def grant_access_to_tenant(self, tenant, **kwargs):
+        self.user.secondary_tenants.add(tenant, **kwargs)
+
     def get_preferred_language(self):
         return self.preferred_language or get_language()
 
@@ -86,3 +94,39 @@ class UserProfile(models.Model):
     class Meta:
         verbose_name = _("user profile")
         verbose_name_plural = _("user profiles")
+
+
+class UserSecondaryTenantAccess(models.Model):
+    created = models.DateTimeField(auto_now_add=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="secondary_tenants",
+    )
+    tenant = models.ForeignKey(
+        "wagtailcore.Tenant",
+        on_delete=models.CASCADE,
+        related_name="secondary_user_access",
+    )
+
+    class Meta:
+        unique_together = ("user", "tenant")
+
+
+class WagtailGroupQuerySet(TenantMemberQuerySet):
+    def shared_with_tenant_q(self, tenant: Tenant) -> Q:
+        return Q(is_global=True)
+
+
+class WagtailGroup(TenantMember):
+
+    group = models.OneToOneField(
+        "auth.Group",
+        on_delete=models.CASCADE,
+        related_name="wagtailgroup",
+        primary_key=True,
+    )
+
+    is_global = models.BooleanField(default=False)
+
+    objects = WagtailGroupQuerySet.as_manager()

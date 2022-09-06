@@ -13,8 +13,10 @@ from wagtail.admin.panels import get_edit_handler
 from wagtail.models import PreviewableMixin, RevisionMixin
 from wagtail.utils.decorators import xframe_options_sameorigin_override
 
+from .mixins import TenantAwareMixin
 
-class PreviewOnEdit(View):
+
+class PreviewOnEdit(TenantAwareMixin, View):
     model = None
     http_method_names = ("post", "get", "delete")
     preview_expiration_timeout = 60 * 60 * 24  # seconds
@@ -48,7 +50,7 @@ class PreviewOnEdit(View):
         return f"{self.session_key_prefix}{unique_key}"
 
     def get_object(self):
-        obj = get_object_or_404(self.model, pk=unquote(self.kwargs["pk"]))
+        obj = get_object_or_404(self.get_queryset(), pk=unquote(self.kwargs["pk"]))
         if isinstance(obj, RevisionMixin):
             obj = obj.get_latest_revision_as_object()
         return obj
@@ -127,7 +129,7 @@ class PreviewOnCreate(PreviewOnEdit):
         return self.model()
 
 
-class PreviewRevision(View):
+class PreviewRevision(TenantAwareMixin, View):
     model = None
     http_method_names = ("get",)
 
@@ -141,7 +143,7 @@ class PreviewRevision(View):
     def get_object(self):
         if not issubclass(self.model, RevisionMixin):
             raise Http404
-        return get_object_or_404(self.model, pk=unquote(self.pk))
+        return get_object_or_404(self.get_queryset(), pk=unquote(self.pk))
 
     def get_revision_object(self):
         revision = get_object_or_404(self.object.revisions, id=self.revision_id)

@@ -22,9 +22,13 @@ class Index(IndexView):
     header_icon = "folder-open-1"
 
     def get_queryset(self):
-        return self.permission_policy.instances_user_has_any_permission_for(
-            self.request.user, ["add", "change", "delete"]
-        ).exclude(depth=1)
+        return (
+            self.permission_policy.instances_user_has_any_permission_for(
+                self.request.user, ["add", "change", "delete"]
+            )
+            .native_to_active_tenant()
+            .exclude(depth=1)
+        )
 
 
 class Create(CreateView):
@@ -42,7 +46,7 @@ class Create(CreateView):
         # Now filter collections offered in parent field by current user's add permissions
         collections = self.permission_policy.instances_user_has_permission_for(
             self.request.user, "add"
-        )
+        ).native_to_active_tenant()
         form.fields["parent"].queryset = collections
         return form
 
@@ -85,9 +89,13 @@ class Edit(EditView):
             ).exists()
 
     def get_queryset(self):
-        return self.permission_policy.instances_user_has_permission_for(
-            self.request.user, "change"
-        ).exclude(depth=1)
+        return (
+            self.permission_policy.instances_user_has_permission_for(
+                self.request.user, "change"
+            )
+            .native_to_active_tenant()
+            .exclude(depth=1)
+        )
 
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
@@ -104,7 +112,7 @@ class Edit(EditView):
             collections = self.permission_policy.instances_user_has_permission_for(
                 user, "add"
             )
-            form.fields["parent"].queryset = collections
+            form.fields["parent"].queryset = collections.native_to_active_tenant()
             # Disable unavailable options in CollectionChoiceField select widget
             form.fields["parent"].disabled_queryset = form.instance.get_descendants(
                 inclusive=True
@@ -125,8 +133,9 @@ class Edit(EditView):
             self.permission_policy.instances_user_has_permission_for(
                 self.request.user, "delete"
             )
+            .native_to_active_tenant()
             .filter(pk=self.object.pk)
-            .first()
+            .exists()
         )
         return context
 
@@ -144,9 +153,13 @@ class Delete(DeleteView):
     header_icon = "folder-open-1"
 
     def get_queryset(self):
-        return self.permission_policy.instances_user_has_permission_for(
-            self.request.user, "delete"
-        ).exclude(depth=1)
+        return (
+            self.permission_policy.instances_user_has_permission_for(
+                self.request.user, "delete"
+            )
+            .native_to_active_tenant()
+            .exclude(depth=1)
+        )
 
     def get_collection_contents(self):
         collection_contents = [
