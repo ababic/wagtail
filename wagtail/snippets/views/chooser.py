@@ -30,6 +30,13 @@ class BaseSnippetChooseView(BaseChooseView):
             columns += [LiveStatusTagColumn(sort_key=None)]
         return columns
 
+    def can_create(self):
+        if getattr(self.model, "choose_only", False):
+            return False
+        return self.get_permission_policy().user_has_permission(
+            self.request.user, "add"
+        )
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
