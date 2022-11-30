@@ -51,18 +51,18 @@ class SnippetAdminURLFinder:
             )
 
 
-def register_snippet(model, viewset=None):
+def register_snippet(model, viewset=None, choose_only=False):
     if DEFER_REGISTRATION:
         # Models may not have been fully loaded yet, so defer registration until they are -
         # add it to the list of registrations to be processed by register_deferred_snippets
-        DEFERRED_REGISTRATIONS.append((model, viewset))
+        DEFERRED_REGISTRATIONS.append((model, viewset, choose_only))
     else:
-        _register_snippet_immediately(model, viewset)
+        _register_snippet_immediately(model, viewset, choose_only)
 
     return model
 
 
-def _register_snippet_immediately(model, viewset=None):
+def _register_snippet_immediately(model, viewset=None, choose_only=False):
     # Register the viewset and formfield for this snippet model,
     # skipping the check for whether models are loaded
 
@@ -73,6 +73,7 @@ def _register_snippet_immediately(model, viewset=None):
     from wagtail.snippets.views.chooser import SnippetChooserViewSet
     from wagtail.snippets.views.snippets import SnippetViewSet
 
+    model.choose_only = choose_only
     model.get_usage = lambda obj: ReferenceIndex.get_references_to(
         obj
     ).group_by_source_object()
@@ -80,33 +81,33 @@ def _register_snippet_immediately(model, viewset=None):
     model.get_admin_base_path = get_admin_base_path
     model.get_admin_url_namespace = get_admin_url_namespace
 
-    if viewset is None:
-        viewset = SnippetViewSet
-    elif isinstance(viewset, str):
-        viewset = import_string(viewset)
-
-    admin_viewset = viewset(
-        model.get_admin_url_namespace(),
-        model=model,
-        url_prefix=model.get_admin_base_path(),
-    )
+    SNIPPET_MODELS.append(model)
+    SNIPPET_MODELS.sort(key=lambda x: x._meta.verbose_name)
 
     chooser_viewset = SnippetChooserViewSet(
         f"wagtailsnippetchoosers_{model._meta.app_label}_{model._meta.model_name}",
         model=model,
         url_prefix=f"snippets/choose/{model._meta.app_label}/{model._meta.model_name}",
     )
-
-    viewsets.register(admin_viewset)
     viewsets.register(chooser_viewset)
 
-    SNIPPET_MODELS.append(model)
-    SNIPPET_MODELS.sort(key=lambda x: x._meta.verbose_name)
+    if not choose_only:
+        if viewset is None:
+            viewset = SnippetViewSet
+        elif isinstance(viewset, str):
+            viewset = import_string(viewset)
 
-    @checks.register("panels")
-    def modeladmin_model_check(app_configs, **kwargs):
-        errors = check_panels_in_model(model, "snippets")
-        return errors
+        admin_viewset = viewset(
+            model.get_admin_url_namespace(),
+            model=model,
+            url_prefix=model.get_admin_base_path(),
+        )
+        viewsets.register(admin_viewset)
+
+        @checks.register("panels")
+        def modeladmin_model_check(app_configs, **kwargs):
+            errors = check_panels_in_model(model, "snippets")
+            return errors
 
     # Set up admin model forms to use AdminSnippetChooser for any ForeignKey to this model
     register_form_field_override(
