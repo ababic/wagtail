@@ -96,7 +96,10 @@ class ModelIndexView(generic.IndexView):
                 "model": model,
             }
             for model in get_snippet_models()
-            if user_can_edit_snippet_type(self.request.user, model)
+            if (
+                not getattr(model, "choose_only", False)
+                and user_can_edit_snippet_type(self.request.user, model)
+            )
         ]
 
     def dispatch(self, request, *args, **kwargs):
