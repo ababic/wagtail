@@ -15,7 +15,7 @@ from django.core.handlers.wsgi import WSGIRequest
 from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory, TestCase
 from django.test.utils import override_settings
-from django.urls import reverse
+from django.urls import reverse, NoReverseMatch
 from django.utils.timezone import make_aware, now
 from freezegun import freeze_time
 from taggit.models import Tag
@@ -52,6 +52,7 @@ from wagtail.test.snippets.models import (
     StandardSnippetWithCustomPrimaryKey,
     TranslatableSnippet,
     ZuluSnippet,
+    ChooseOnlySnippet,
 )
 from wagtail.test.testapp.models import (
     Advert,
@@ -98,6 +99,56 @@ class TestSnippetIndexView(TestCase, WagtailTestUtils):
 
     def test_displays_snippet(self):
         self.assertContains(self.get(), "Adverts")
+
+
+class TestChooseOnlySnippet(TestCase, WagtailTestUtils):
+    @classmethod
+    def setUpTestData(cls):
+        cls.snippet_obj = ChooseOnlySnippet.objects.get(id=1)
+        app_label = ChooseOnlySnippet._meta.app_label
+        model_name = ChooseOnlySnippet._meta.model_name
+        cls.regular_url_base = f"wagtailsnippets_{app_label}_{model_name}"
+        cls.chooser_url_base = f"wagtailsnippets_{app_label}_{model_name}"
+
+    def test_model_does_not_appear_in_index(self):
+        path = reverse("wagtailsnippets:index")
+        self.assertNotContains(
+            self.client.get(path), ChooseOnlySnippet._meta.verbose_name_plural
+        )
+
+    def test_chooser_results_view_available(self):
+        path = reverse(self.chooser_url_base + ":choose_results")
+        self.assertEqual(self.client.get(path).response_code, 200)
+
+    def test_chooser_choose_view_available(self):
+        path = reverse(self.chooser_url_base + ":choose")
+        self.assertEqual(self.client.get(path).response_code, 200)
+
+    def test_chooser_chosen_view_available(self):
+        path = reverse(
+            self.chooser_url_base + ":choosen", kwargs={"pk": self.snippet_obj.pk}
+        )
+        self.assertEqual(self.client.get(path).response_code, 200)
+
+    def test_chooser_create_view_access_denied(self):
+        path = reverse(self.chooser_url_base + ":create")
+        self.assertRedirects(self.client.get(path), "/admin/login")
+
+    def test_list_url_not_registered(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse(self.regular_url_base + ":list")
+
+    def test_add_url_not_registered(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse(self.regular_url_base + ":add")
+
+    def test_edit_url_not_registered(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse(self.regular_url_base + ":edit", args=[self.snippet_obj.pk])
+
+    def test_delete_url_not_registered(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse(self.regular_url_base + ":delete", args=[self.snippet_obj.pk])
 
 
 class TestSnippetListView(TestCase, WagtailTestUtils):

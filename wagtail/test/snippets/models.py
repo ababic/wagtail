@@ -138,3 +138,8 @@ class StandardSnippetWithCustomPrimaryKey(models.Model):
 @register_snippet
 class TranslatableSnippet(TranslatableMixin, models.Model):
     text = models.CharField(max_length=255)
+
+
+@register_snippet(choose_only=True)
+class ChooseOnlySnippet(models.Model):
+    title = models.CharField(max_length=255)
