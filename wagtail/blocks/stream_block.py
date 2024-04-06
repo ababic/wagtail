@@ -76,9 +76,12 @@ class StreamBlockValidationError(ValidationError):
 
 
 class BaseStreamBlock(Block):
+    default_value_class = None
+
     def __init__(self, local_blocks=None, search_index=True, **kwargs):
         self._constructor_kwargs = kwargs
         self.search_index = search_index
+        self.value_class = kwargs.get("value_class", self.default_value_class)
 
         super().__init__(**kwargs)
 
@@ -90,7 +93,7 @@ class BaseStreamBlock(Block):
                 self.child_blocks[name] = block
 
     def empty_value(self, raw_text=None):
-        return StreamValue(self, [], raw_text=raw_text)
+        return self.value_class(self, [], raw_text=raw_text)
 
     def sorted_child_blocks(self):
         """Child blocks, sorted in to their groups."""
@@ -132,7 +135,7 @@ class BaseStreamBlock(Block):
             )
 
         values_with_indexes.sort()
-        return StreamValue(
+        return self.value_class(
             self,
             [
                 (child_block_type_name, value, block_id)
@@ -220,10 +223,10 @@ class BaseStreamBlock(Block):
                 block_errors=errors, non_block_errors=non_block_errors
             )
 
-        return StreamValue(self, cleaned_data)
+        return self.value_class(self, cleaned_data)
 
     def to_python(self, value):
-        if isinstance(value, StreamValue):
+        if isinstance(value, self.value_class):
             return value
         elif isinstance(value, str) and value:
             try:
@@ -246,7 +249,7 @@ class BaseStreamBlock(Block):
             # value is in JSONish representation - a dict with 'type' and 'value' keys.
             # This is passed to StreamValue to be expanded lazily - but first we reject any unrecognised
             # block types from the list
-            return StreamValue(
+            return self.value_class(
                 self,
                 [
                     child_data
@@ -267,7 +270,7 @@ class BaseStreamBlock(Block):
                 ) from exc
 
             # Test succeeded, so return as a StreamValue-ified version of that value
-            return StreamValue(
+            return self.value_class(
                 self,
                 [
                     (k, self.child_blocks[k].normalize(v))
@@ -314,7 +317,7 @@ class BaseStreamBlock(Block):
         # for each stream, go through the block map, picking out the appropriately-indexed
         # value from the relevant list in child_outputs
         return [
-            StreamValue(
+            self.value_class(
                 self,
                 [
                     (block_type, child_outputs[block_type][child_index], id)
