@@ -225,6 +225,29 @@ class TestStreamValueAccess(TestCase):
         self.assertIsInstance(fetched_body[0].value, RichText)
         self.assertEqual(fetched_body[0].value.source, "<h2>hello world</h2>")
 
+    def test_custom_value_class(self):
+        class CustomStreamValue(StreamValue):
+            pass
+
+        body_field = JSONStreamModel._meta.get_field("body")
+
+        body_field.stream_block.value_class = CustomStreamValue
+        try:
+            self.json_body.body = [("rich_text", RichText("<h2>hello world</h2>"))]
+            self.json_body.save()
+
+            # As above, the body should now be a stream consisting of a single rich_text block
+            fetched_body = JSONStreamModel.objects.get(id=self.json_body.id).body
+            # The 'value_class' of the underlying stream_block should be respected
+            self.assertIsInstance(fetched_body, CustomStreamValue)
+            # CustomStreamValue is functionally equivalent to StreamValue, so the same value
+            # transformation should have taken place
+            self.assertEqual(len(fetched_body), 1)
+            self.assertIsInstance(fetched_body[0].value, RichText)
+            self.assertEqual(fetched_body[0].value.source, "<h2>hello world</h2>")
+        finally:
+            body_field.stream_block.value_class = StreamValue
+
     def test_can_append(self):
         self.json_body.body.append(("text", "bar"))
         self.json_body.save()
