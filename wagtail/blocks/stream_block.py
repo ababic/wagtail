@@ -76,6 +76,9 @@ class StreamBlockValidationError(ValidationError):
 
 
 class BaseStreamBlock(Block):
+    # This is set to `StreamValue` a little further down. The idea is that
+    # developers can override this on custom subclasses to change the default
+    # `value_class` for all instances
     default_value_class = None
 
     def __init__(self, local_blocks=None, search_index=True, **kwargs):
@@ -802,6 +805,11 @@ class StreamValue(MutableSequence):
                 self.get_prep_value(),
             ),
         )
+
+
+# Now that StreamValue is defined, make it the default `value_class`
+# for all `BaseStreamBlock` subclasses
+BaseStreamBlock.default_value_class = StreamValue
 
 
 class StreamBlockAdapter(Adapter):
