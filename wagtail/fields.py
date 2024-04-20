@@ -113,7 +113,7 @@ class StreamField(models.Field):
 
     @property
     def value_class(self):
-        return self.stream_block.value_class
+        return self.stream_block.meta.value_class
 
     @property
     def json_field(self):
