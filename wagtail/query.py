@@ -147,11 +147,17 @@ class SpecificQuerySetMixin:
         super().__init__(*args, **kwargs)
         # set by PageQuerySet.defer_streamfields()
         self._defer_streamfields = False
+        self._specific_select_related_fields = ()
+        self._specific_prefetch_related_lookups = ()
 
     def _clone(self):
         """Ensure clones inherit custom attribute values."""
         clone = super()._clone()
         clone._defer_streamfields = self._defer_streamfields
+        clone._specific_select_related_fields = self._specific_select_related_fields
+        clone._specific_prefetch_related_lookups = (
+            self._specific_prefetch_related_lookups
+        )
         return clone
 
     def specific(self, defer=False):
@@ -178,6 +184,50 @@ class SpecificQuerySetMixin:
             self._iterable_class,
             (SpecificIterable, DeferredSpecificIterable),
         )
+
+    def select_related(self, *fields, for_specific_subqueries: bool = False):
+        """
+        Return a new QuerySet instance that will select related objects.
+
+        If fields are specified, they must be ForeignKey fields and only those
+        related objects are included in the selection.
+
+        If select_related(None) is called, clear the list.
+
+        When called with `for_specific_subqueries=True`, the selected fields
+        will be combined
+        """
+
+        if not for_specific_subqueries:
+            return super().select_related(*fields)
+        clone = self._chain()
+        if not fields:
+            raise ValueError(
+                "'fields' must be specified when calling select_related() with for_specific_subqueries=True"
+            )
+        if fields == (None,):
+            clone._specific_select_related_fields = ()
+        else:
+            clone._specific_select_related_fields = (
+                self._specific_select_related_fields + fields
+            )
+        return clone
+
+    def prefetch_related(self, *lookups, for_specific_subqueries: bool = False):
+        if not for_specific_subqueries:
+            return super().prefetch_related(*lookups)
+        clone = self._chain()
+        if not lookups:
+            raise ValueError(
+                "'lookups' must be provided when calling prefetch_related() with for_specific_subqueries=True"
+            )
+        if lookups == (None,):
+            clone._specific_prefetch_related_lookups = ()
+        else:
+            clone._specific_prefetch_related_lookups = (
+                self._specific_prefetch_related_lookups + lookups
+            )
+        return clone
 
 
 class PageQuerySet(SearchableQuerySetMixin, SpecificQuerySetMixin, TreeQuerySet):
@@ -560,6 +610,14 @@ class SpecificIterable(ModelIterable):
                 # model (i.e. Page) if the more specific one is missing
                 model = content_types[content_type].model_class() or qs.model
                 items = model.objects.filter(pk__in=pks)
+
+                if qs._specific_select_related_fields:
+                    items = items.select_related(*qs._specific_select_related_fields)
+
+                if qs._specific_prefetch_related_lookups:
+                    items = items.prefetch_related(
+                        *qs._specific_prefetch_related_lookups
+                    )
 
                 if qs._defer_streamfields and hasattr(items, "defer_streamfields"):
                     items = items.defer_streamfields()
