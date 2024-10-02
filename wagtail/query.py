@@ -200,11 +200,11 @@ class SpecificQuerySetMixin:
 
         if not for_specific_subqueries:
             return super().select_related(*fields)
-        clone = self._chain()
         if not fields:
             raise ValueError(
                 "'fields' must be specified when calling select_related() with for_specific_subqueries=True"
             )
+        clone = self._chain()
         if fields == (None,):
             clone._specific_select_related_fields = ()
         else:
@@ -216,11 +216,11 @@ class SpecificQuerySetMixin:
     def prefetch_related(self, *lookups, for_specific_subqueries: bool = False):
         if not for_specific_subqueries:
             return super().prefetch_related(*lookups)
-        clone = self._chain()
         if not lookups:
             raise ValueError(
                 "'lookups' must be provided when calling prefetch_related() with for_specific_subqueries=True"
             )
+        clone = self._chain()
         if lookups == (None,):
             clone._specific_prefetch_related_lookups = ()
         else:
