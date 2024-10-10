@@ -187,15 +187,52 @@ class SpecificQuerySetMixin:
 
     def select_related(self, *fields, for_specific_subqueries: bool = False):
         """
-        Return a new QuerySet instance that will select related objects.
+        Overrides [Django's native `select_related()` implementation](https://docs.djangoproject.com/en/stable/ref/models/querysets/#django.db.models.query.QuerySet.select_related)
+        to allow related objects to be fetched when sourcing specific data when a
+        specific queryset is evaluated.
 
-        If fields are specified, they must be ForeignKey fields and only those
-        related objects are included in the selection.
+        When `for_specific_subqueries` is `False` (the default), the method functions
+        exactly like the original method. However, when `True`, `fields` are **required**, and must
+        match names of ForeignKey fields on all specific models that might be included in
+        the result (which can include fields inherited from concrete parents). Unlike when
+        `for_specific_subqueries` is `False`, no validation is applied to `fields`
+        when the method is called. Rather, that validation is applied for each individual
+        subquery when the queryset is eventually evaluated. This difference in behaviour
+        should be taken into account when experimenting with `for_specific_subqueries=True` .
 
-        If select_related(None) is called, clear the list.
+        As with Django's native implementation, you chain multiple applications of
+        `select_related()` with `for_specific_subqueries=True` to progressively add to
+        the list of fields to be fetched. For example:
 
-        When called with `for_specific_subqueries=True`, the selected fields
-        will be combined
+        ```python
+        # Fetch 'author' when retrieving specific page data
+        queryset = Page.objects.specific().select_related("author", for_specific_subqueries=True)
+
+        # We're rendering cards with images, so fetch the listing image too
+        queryset = queryset.select_related("listing_image", for_specific_subqueries=True)
+
+        # Fetch some key taxonomy data too
+        queryset = queryset.select_related("topic", "target_audience", for_specific_subqueries=True)
+        ```
+
+        As with Django's native implementation, `None` can be supplied in place of
+        `fields` to negate a previous application of `select_related()`. By default,
+        this will only work for cases where `select_related()` was called without
+        `for_specific_subqueries`, or with `for_specific_subqueries=False`. However,
+        you can use `for_specific_subqueries=True` to negate subquery-specific
+        applications too. For example:
+
+        ```python
+        # Fetch 'author' and 'listing_image' when retrieving specific page data
+        queryset = Page.objects.specific().select_related(
+            "author",
+            "listing_image",
+            for_specific_subqueries=True
+        )
+
+        # I've changed my mind. Do not fetch any additional data
+        queryset = queryset.select_related(None, for_specific_subqueries=True)
+        ```
         """
 
         if not for_specific_subqueries:
@@ -214,6 +251,55 @@ class SpecificQuerySetMixin:
         return clone
 
     def prefetch_related(self, *lookups, for_specific_subqueries: bool = False):
+        """
+        Overrides [Django's native `prefetch_related()` implementation](https://docs.djangoproject.com/en/stable/ref/models/querysets/#django.db.models.query.QuerySet.prefetch_related)
+        to allow related objects to be fetched when sourcing specific data when a
+        specific queryset is evaluated.
+
+        When `for_specific_subqueries` is `False` (the default), the method functions
+        exactly like the original method. However, when `True`, `lookups` are
+        **required**, and must match names of related fields on all specific models that
+        might be included in the result (which can include relationships inherited from
+        concrete parents). Unlike when `for_specific_subqueries` is `False`, no
+        validation is applied to `lookups` when the method is called. Rather, that
+        validation is applied for each individual subquery when the queryset is
+        eventually evaluated. This difference in behaviour should be taken into account
+        when experimenting with `for_specific_subqueries=True`.
+
+        As with Django's native implementation, you chain multiple applications of
+        `select_related()` with `for_specific_subqueries=True` to progressively add to
+        the list of lookups to be made. For example:
+
+        ```python
+        # Fetch 'contributors' when retrieving specific page data
+        queryset = Page.objects.specific().prefetch_related("contributors", for_specific_subqueries=True)
+
+        # We're rendering cards with images, so prefetch listing image renditions too
+        queryset = queryset.prefetch_related("listing_image__renditions", for_specific_subqueries=True)
+
+        # Fetch some key taxonomy data also
+        queryset = queryset.select_related("tags", for_specific_subqueries=True)
+        ```
+
+        As with Django's native implementation, `None` can be supplied in place of
+        `lookups` to negate a previous application of `prefetch_related()`. By default,
+        this will only work for cases where `prefetch_related()` was called without
+        `for_specific_subqueries`, or with `for_specific_subqueries=False`. However,
+        you can use `for_specific_subqueries=True` to negate subquery-specific
+        applications too. For example:
+
+        ```python
+        # Fetch 'contributors' and 'listing_image' renditions when retrieving specific page data
+        queryset = Page.objects.specific().prefetch_related(
+            "contributors",
+            "listing_image__renditions",
+            for_specific_subqueries=True
+        )
+
+        # I've changed my mind. Do not make any additional queries
+        queryset = queryset.prefetch_related(None, for_specific_subqueries=True)
+        ```
+        """
         if not for_specific_subqueries:
             return super().prefetch_related(*lookups)
         if not lookups:
