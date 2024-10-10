@@ -299,8 +299,8 @@ menu_items = homepage.get_children().live().in_menu()
 
         Using `prefetch_related()` with `for_specific_subqueries=True` should be reserved
         for cases where a large number of results is needed, or the type-variance is
-        retricted in some way. For example, rendering a list of child pages where
+        retricted in some way. For example, when rendering a list of child pages where
         `allow_subtypes` is set on the parent, limiting the results to a small number of
-        page types, or where the `type()` or `not_type()` filters have been applied to
+        page types. Or, where the `type()` or `not_type()` filters have been applied to
         restrict the queryset to a small number of specific types.
 ```
