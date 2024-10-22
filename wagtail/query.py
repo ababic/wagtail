@@ -188,8 +188,8 @@ class SpecificQuerySetMixin:
     def select_related(self, *fields, for_specific_subqueries: bool = False):
         """
         Overrides Django's native :meth:`~django.db.models.query.QuerySet.select_related`
-        to allow related objects to be fetched when sourcing specific data when a
-        specific queryset is evaluated.
+        to allow related objects to be fetched by the subqueries made when a specific
+        queryset is evaluated.
 
         When ``for_specific_subqueries`` is ``False`` (the default), the method functions
         exactly like the original method. However, when ``True``, ``fields`` are
@@ -254,7 +254,7 @@ class SpecificQuerySetMixin:
     def prefetch_related(self, *lookups, for_specific_subqueries: bool = False):
         """
         Overrides Django's native :meth:`~django.db.models.query.QuerySet.prefetch_related`
-        implementation to allow related objects to be fetched when sourcing specific data
+        implementation to allow related objects to be fetched alongside the subqueries made
         when a specific queryset is evaluated.
 
         When ``for_specific_subqueries`` is ``False`` (the default), the method functions
