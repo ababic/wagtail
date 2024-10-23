@@ -143,8 +143,9 @@ def _get_page_cached_urls(page, *, request=None):
     ]
 
 
-def purge_page_from_cache(page, backend_settings=None, backends=None):
-    purge_pages_from_cache([page], backend_settings=backend_settings, backends=backends)
+def purge_page_from_cache(page, backend_settings=None, backends=None, *, request=None):
+    urls = _get_page_cached_urls(page, request=request)
+    purge_urls_from_cache(urls, backend_settings, backends)
 
 
 def purge_pages_from_cache(
