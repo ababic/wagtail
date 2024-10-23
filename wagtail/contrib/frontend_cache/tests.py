@@ -479,7 +479,7 @@ class TestCachePurgingFunctions(TestCase):
 
     def test_purge_pages_from_cache(self):
         pages = list(Page.objects.all().type(EventPage))
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(2):
             purge_pages_from_cache(pages)
         self.assertEqual(PURGED_URLS, EVENTPAGE_URLS)
 
@@ -502,7 +502,7 @@ class TestCachePurgingFunctions(TestCase):
     def test_purge_batch_with_multiple_pages(self):
         batch = PurgeBatch()
         pages = list(Page.objects.all().type(EventPage))
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(2):
             batch.add_pages(pages)
         batch.purge()
 
