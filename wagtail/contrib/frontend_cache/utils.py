@@ -132,8 +132,8 @@ def purge_urls_from_cache(urls, backend_settings=None, backends=None):
             backend.purge_batch(urls)
 
 
-def _get_page_cached_urls(page):
-    page_url = page.full_url
+def _get_page_cached_urls(page, *, request=None):
+    page_url = page.get_full_url(request)
     if page_url is None:  # nothing to be done if the page has no routable URL
         return []
 
