@@ -187,7 +187,7 @@ class PurgeBatch:
         This combines the page's full URL with each path that is returned by
         the page's `.get_cached_paths` method
         """
-        self.add_urls(_get_page_cached_urls(page))
+        self.add_urls(_get_page_cached_urls(page, request=self.request))
 
     def add_pages(self, pages):
         """

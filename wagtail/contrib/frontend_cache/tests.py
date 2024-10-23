@@ -504,9 +504,7 @@ class TestCachePurgingFunctions(TestCase):
     def test_purge_batch_with_multiple_pages(self):
         batch = PurgeBatch()
         pages = list(Page.objects.all().type(EventPage))
-        # For each page, a query is made to fetch the specific instance,
-        # and another is made to fetch site root paths
-        with self.assertNumQueries(len(pages)):
+        with self.assertNumQueries(1):
             batch.add_pages(pages)
         batch.purge()
 
