@@ -137,7 +137,10 @@ def _get_page_cached_urls(page):
     if page_url is None:  # nothing to be done if the page has no routable URL
         return []
 
-    return [page_url + path.lstrip("/") for path in page.specific.get_cached_paths()]
+    return [
+        page_url + path.lstrip("/")
+        for path in page.specific_deffered.get_cached_paths()
+    ]
 
 
 def purge_page_from_cache(page, backend_settings=None, backends=None):

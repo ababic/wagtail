@@ -481,7 +481,7 @@ class TestCachePurgingFunctions(TestCase):
         pages = list(Page.objects.all().type(EventPage))
         # For each page, a query is made to fetch the specific instance,
         # and another is made to fetch site root paths
-        with self.assertNumQueries(len(pages) * 2):
+        with self.assertNumQueries(len(pages)):
             purge_pages_from_cache(pages)
         self.assertEqual(PURGED_URLS, EVENTPAGE_URLS)
 
@@ -506,7 +506,7 @@ class TestCachePurgingFunctions(TestCase):
         pages = list(Page.objects.all().type(EventPage))
         # For each page, a query is made to fetch the specific instance,
         # and another is made to fetch site root paths
-        with self.assertNumQueries(len(pages) * 2):
+        with self.assertNumQueries(len(pages)):
             batch.add_pages(pages)
         batch.purge()
 
