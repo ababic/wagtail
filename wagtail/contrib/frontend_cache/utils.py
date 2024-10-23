@@ -139,7 +139,7 @@ def _get_page_cached_urls(page, *, request=None):
 
     return [
         page_url + path.lstrip("/")
-        for path in page.specific_deffered.get_cached_paths()
+        for path in page.specific_deferred.get_cached_paths()
     ]
 
 
