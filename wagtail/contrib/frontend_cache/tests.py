@@ -17,7 +17,8 @@ from wagtail.contrib.frontend_cache.backends import (
     HTTPBackend,
 )
 from wagtail.contrib.frontend_cache.utils import get_backends
-from wagtail.models import Page
+from wagtail.coreutils import get_dummy_request
+from wagtail.models import Page, Site
 from wagtail.test.testapp.models import EventIndex, EventPage
 from wagtail.utils.deprecation import RemovedInWagtail70Warning
 
@@ -477,11 +478,44 @@ class TestCachePurgingFunctions(TestCase):
             PURGED_URLS, {"http://localhost/events/", "http://localhost/events/past/"}
         )
 
+    def test_purge_page_from_cache_with_shared_request(self):
+        request = get_dummy_request()
+        page = EventIndex.objects.get(url_path="/home/events/")
+
+        # Ensure the current site and site root paths are already cached for the request,
+        # which should result in zero additional queries being incurred by this test
+        Site.find_for_request(request)
+        page._get_relevant_site_root_paths(request)
+
+        with self.assertNumQueries(0):
+            for _i in range(4):
+                purge_page_from_cache(page, request=request)
+                self.assertEqual(
+                    PURGED_URLS,
+                    {"http://localhost/events/", "http://localhost/events/past/"},
+                )
+                PURGED_URLS.clear()
+
     def test_purge_pages_from_cache(self):
         pages = list(Page.objects.all().type(EventPage))
         with self.assertNumQueries(2):
             purge_pages_from_cache(pages)
         self.assertEqual(PURGED_URLS, EVENTPAGE_URLS)
+
+    def test_purge_pages_from_cache_with_shared_request(self):
+        request = get_dummy_request()
+        pages = list(Page.objects.all().type(EventPage))
+
+        # Ensure the current site and site root paths are already cached for the request,
+        # which should result in zero additional queries being incurred by this test
+        Site.find_for_request(request)
+        pages[1]._get_relevant_site_root_paths(request)
+
+        with self.assertNumQueries(0):
+            for _i in range(4):
+                purge_pages_from_cache(pages, request=request)
+                self.assertEqual(PURGED_URLS, EVENTPAGE_URLS)
+                PURGED_URLS.clear()
 
     def test_purge_batch(self):
         batch = PurgeBatch()
@@ -507,6 +541,23 @@ class TestCachePurgingFunctions(TestCase):
         batch.purge()
 
         self.assertEqual(PURGED_URLS, EVENTPAGE_URLS)
+
+    def test_multiple_purge_batches_with_shared_request(self):
+        request = get_dummy_request()
+        pages = list(Page.objects.all().type(EventPage))
+
+        # Ensure the current site and site root paths are already cached for the request,
+        # which should result in zero additional queries being incurred by this test
+        Site.find_for_request(request)
+        pages[1]._get_relevant_site_root_paths(request)
+
+        with self.assertNumQueries(0):
+            for _i in range(4):
+                batch = PurgeBatch(request=request)
+                batch.add_pages(pages)
+                batch.purge()
+                self.assertEqual(PURGED_URLS, EVENTPAGE_URLS)
+                PURGED_URLS.clear()
 
     @override_settings(
         WAGTAILFRONTENDCACHE={
