@@ -7,7 +7,7 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 
-from wagtail.coreutils import get_content_languages
+from wagtail.coreutils import get_content_languages, get_dummy_request
 
 logger = logging.getLogger("wagtail.frontendcache")
 
@@ -159,11 +159,13 @@ def purge_pages_from_cache(pages, backend_settings=None, backends=None):
 class PurgeBatch:
     """Represents a list of URLs to be purged in a single request"""
 
-    def __init__(self, urls=None):
+    def __init__(self, urls=None, *, request=None):
         self.urls = set()
 
         if urls is not None:
             self.add_urls(urls)
+
+        self.request = request or get_dummy_request()
 
     def add_url(self, url):
         """Adds a single URL"""
