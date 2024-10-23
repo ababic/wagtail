@@ -147,13 +147,12 @@ def purge_page_from_cache(page, backend_settings=None, backends=None):
     purge_pages_from_cache([page], backend_settings=backend_settings, backends=backends)
 
 
-def purge_pages_from_cache(pages, backend_settings=None, backends=None):
-    urls = []
-    for page in pages:
-        urls.extend(_get_page_cached_urls(page))
-
-    if urls:
-        purge_urls_from_cache(urls, backend_settings, backends)
+def purge_pages_from_cache(
+    pages, backend_settings=None, backends=None, *, request=None
+):
+    batch = PurgeBatch(request=request)
+    batch.add_pages(pages)
+    batch.purge(backend_settings, backends)
 
 
 class PurgeBatch:

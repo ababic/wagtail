@@ -479,9 +479,7 @@ class TestCachePurgingFunctions(TestCase):
 
     def test_purge_pages_from_cache(self):
         pages = list(Page.objects.all().type(EventPage))
-        # For each page, a query is made to fetch the specific instance,
-        # and another is made to fetch site root paths
-        with self.assertNumQueries(len(pages)):
+        with self.assertNumQueries(1):
             purge_pages_from_cache(pages)
         self.assertEqual(PURGED_URLS, EVENTPAGE_URLS)
 
