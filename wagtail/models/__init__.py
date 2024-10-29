@@ -38,6 +38,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models, transaction
 from django.db.models import Q, Value
 from django.db.models.expressions import OuterRef, Subquery
+from django.db.models.fields.related import ForeignObjectRel
 from django.db.models.functions import Concat, Substr
 from django.dispatch import receiver
 from django.http import Http404
@@ -315,6 +316,11 @@ class RevisionMixin(models.Model):
         editable=False,
     )
 
+    # A list of names of custom fields that are managed at the instance level, and should
+    # never change between revisions. For example: additional identifiers and data sourced
+    # from external systems.
+    non_revisable_fields = []
+
     # An array of additional field names that will not be included when the object is copied.
     default_exclude_fields_in_copy = [
         "latest_revision",
@@ -372,12 +378,12 @@ class RevisionMixin(models.Model):
             return get_serializable_data_for_fields(self)
 
     @classmethod
-    def from_serializable_data(cls, data, check_fks=True, strict_fks=False):
+    def from_serializable_data(cls, data, check_fks=True, strict_fks=False, exclude_fields=None):
         try:
-            return super().from_serializable_data(data, check_fks, strict_fks)
+            return super().from_serializable_data(data, check_fks, strict_fks, exclude_fields)
         except AttributeError:
             return model_from_serializable_data(
-                cls, data, check_fks=check_fks, strict_fks=strict_fks
+                cls, data, check_fks=check_fks, strict_fks=strict_fks, exclude_fields=exclude_fields
             )
 
     def with_content_json(self, content):
@@ -398,7 +404,8 @@ class RevisionMixin(models.Model):
         * ``translation_key``
         * ``locale``
         """
-        obj = self.from_serializable_data(content)
+        exclude_fields = {"latest_revision", "translation_key", "locale"} + set(self.non_revisable_fields)
+        obj = self.from_serializable_data(content, exclude_fields=exclude_fields)
 
         # This should definitely never change between revisions
         obj.pk = self.pk
@@ -410,6 +417,24 @@ class RevisionMixin(models.Model):
         if isinstance(self, TranslatableMixin):
             obj.translation_key = self.translation_key
             obj.locale = self.locale
+
+        for field_name in self.non_revisable_fields:
+            try:
+                field = obj._meta.get_field(field_name)
+            except FieldDoesNotExist:
+                continue
+
+            if isinstance(field, ForeignObjectRel):
+                continue
+
+            # 'non_revisable_fields' should have been checked by this point,
+            # so we can assume the attribute is always available
+            value = getattr(obj, field_name)
+            # Cast many-to-many values to lists for modelcluster
+            if field.remote_field and isinstance(field.remote_field, models.ManyToManyRel):
+                value = list(value.all())
+
+            setattr(obj, field_name, value)
 
         return obj
 
@@ -2797,6 +2822,7 @@ class Page(AbstractPage, index.Indexed, ClusterableModel, metaclass=PageBase):
         obj.translation_key = self.translation_key
         obj.locale = self.locale
         obj.alias_of_id = self.alias_of_id
+
         revision_comments = getattr(obj, COMMENTS_RELATION_NAME)
         page_comments = getattr(self, COMMENTS_RELATION_NAME).filter(
             resolved_at__isnull=True
