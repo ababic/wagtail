@@ -1,12 +1,15 @@
+from typing import TYPE_CHECKING
 from warnings import warn
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.template.response import TemplateResponse
 from django.urls import reverse
-from django.utils.http import url_has_allowed_host_and_scheme
-from django.views.decorators.http import etag
+from django.utils.cache import patch_cache_control
+from django.utils.http import quote_etag, url_has_allowed_host_and_scheme
+from django.views.generic import View
 
 from wagtail import hooks
 from wagtail.documents import get_document_model
@@ -17,104 +20,157 @@ from wagtail.utils import sendfile_streaming_backend
 from wagtail.utils.deprecation import RemovedInWagtail70Warning
 from wagtail.utils.sendfile import sendfile
 
+if TYPE_CHECKING:
+    from django.http import HttpRequest, HttpResponseBase
+    from django.http.response import HttpResponseRedirectBase
 
-def document_etag(request, document_id, document_filename):
-    Document = get_document_model()
-    if hasattr(Document, "file_hash"):
-        return (
-            Document.objects.filter(id=document_id)
-            .values_list("file_hash", flat=True)
-            .first()
-        )
+    from wagtail.documents.models import AbstractDocument
 
 
-@etag(document_etag)
-def serve(request, document_id, document_filename):
-    Document = get_document_model()
-    doc = get_object_or_404(Document, id=document_id)
+class ServeView(View):
+    model = get_document_model()
+    sendfile_cache_control_headers = {
+        "max_age": 3600,
+        "s_maxage": 3600,
+        "public": True,
+    }
+    serve_cache_control_headers = {
+        "max_age": 3600,
+        "s_maxage": 3600,
+        "public": True,
+    }
+    redirect_cache_control_headers = {
+        "max_age": 3600,
+        "s_maxage": 3600,
+        "public": True,
+    }
 
-    # We want to ensure that the document filename provided in the URL matches the one associated with the considered
-    # document_id. If not we can't be sure that the document the user wants to access is the one corresponding to the
-    # <document_id, document_filename> pair.
-    if doc.filename != document_filename:
-        raise Http404("This document does not match the given filename.")
+    def get(
+        self, request: "HttpRequest", document_id: str, document_filename: str
+    ) -> "HttpResponse":
+        doc = self.get_document(document_id, document_filename)
 
-    for fn in hooks.get_hooks("before_serve_document"):
-        result = fn(doc, request)
-        if isinstance(result, HttpResponse):
-            return result
+        for fn in hooks.get_hooks("before_serve_document"):
+            result = fn(doc, request)
+            if isinstance(result, HttpResponse):
+                return result
 
-    # Send document_served signal
-    document_served.send(sender=Document, instance=doc, request=request)
+        return self.get_success_response(doc)
 
-    try:
-        local_path = doc.file.path
-    except NotImplementedError:
-        local_path = None
+    def get_document(
+        self, document_id: str, document_filename: str
+    ) -> "AbstractDocument":
+        obj = get_object_or_404(self.model, id=document_id)
+        # We want to ensure that the document filename provided in the URL matches the one associated with the considered
+        # document_id. If not we can't be sure that the document the user wants to access is the one corresponding to the
+        # <document_id, document_filename> pair.
+        if obj.filename != document_filename:
+            raise Http404("Document does not match the given filename.")
+        return obj
 
-    try:
-        direct_url = doc.file.url
-    except NotImplementedError:
-        direct_url = None
+    def get_success_response(self, document: "AbstractDocument") -> "HttpResponseBase":
+        # Send document_served signal
+        document_served.send(sender=self.model, instance=document, request=self.request)
 
-    serve_method = getattr(settings, "WAGTAILDOCS_SERVE_METHOD", None)
+        # Identify the serve method to use
+        method_name = self.get_serve_method(document)
 
-    # If no serve method has been specified, select an appropriate default for the storage backend:
-    # redirect for remote storages (i.e. ones that provide a url but not a local path) and
-    # serve_view for all other cases
-    if serve_method is None:
+        # Return a response from the relevant serve method
+        return getattr(self, method_name)(document)
+
+    def get_serve_method(self, document: "AbstractDocument") -> str:
+        serve_method = getattr(settings, "WAGTAILDOCS_SERVE_METHOD", None)
+        valid_methods = ("redirect", "sendfile", "serve")
+        if serve_method:
+            if serve_method not in valid_methods:
+                raise ImproperlyConfigured(
+                    f"Invalid serve method: '{serve_method}'. Valid values for the WAGTAILDOCS_SERVE_METHOD setting are: {valid_methods}"
+                )
+            return serve_method
+
+        # If no serve method has been specified, select an appropriate default for the storage backend:
+        # redirect for remote storages (i.e. ones that provide a url but not a local path) and
+        # serve_view for all other cases
+        try:
+            local_path = document.file.path
+        except NotImplementedError:
+            local_path = None
+
+        try:
+            direct_url = document.file.url
+        except NotImplementedError:
+            direct_url = None
+
         if direct_url and not local_path:
-            serve_method = "redirect"
-        else:
-            serve_method = "serve_view"
+            return "redirect"
+        if local_path:
+            return "sendfile"
+        return "serve"
 
-    if serve_method in ("redirect", "direct") and direct_url:
-        # Serve the file by redirecting to the URL provided by the underlying storage;
-        # this saves the cost of delivering the file via Python.
-        # For serve_method == 'direct', this view should not normally be reached
-        # (the document URL as used in links should point directly to the storage URL instead)
-        # but we handle it as a redirect to provide sensible fallback /
-        # backwards compatibility behaviour.
-        return redirect(direct_url)
+    def redirect(self, document: "AbstractDocument") -> "HttpResponseRedirectBase":
+        response = redirect(document.file.url)
+        response["Content-Disposition"] = document.content_disposition
+        if self.redirect_cache_control_headers:
+            patch_cache_control(response, **self.redirect_cache_control_headers)
+        return response
 
-    if local_path:
-        # Use wagtail.utils.sendfile to serve the file;
-        # this provides support for mimetypes, if-modified-since and django-sendfile backends
+    @property
+    def prevent_inline_execution(self) -> bool:
+        return bool(getattr(settings, "WAGTAILDOCS_BLOCK_EMBEDDED_CONTENT", True))
 
+    def sendfile(self, document: "AbstractDocument") -> HttpResponse:
         sendfile_opts = {
-            "attachment": (doc.content_disposition != "inline"),
-            "attachment_filename": doc.filename,
-            "mimetype": doc.content_type,
+            "attachment": document.content_disposition != "inline",
+            "attachment_filename": document.filename,
+            "mimetype": document.content_type,
         }
         if not hasattr(settings, "SENDFILE_BACKEND"):
             # Fallback to streaming backend if user hasn't specified SENDFILE_BACKEND
             sendfile_opts["backend"] = sendfile_streaming_backend.sendfile
 
-        response = sendfile(request, local_path, **sendfile_opts)
+        response = sendfile(self.request, document.file.path, **sendfile_opts)
 
-    else:
-        # We are using a storage backend which does not expose filesystem paths
-        # (e.g. storages.backends.s3boto.S3BotoStorage) AND the developer has not allowed
-        # redirecting to the file url directly.
-        # Fall back on pre-sendfile behaviour of reading the file content and serving it
-        # as a FileResponse
-        response = FileResponse(doc.file, doc.content_type)
+        if self.prevent_inline_execution:
+            # Add a CSP header to prevent inline execution
+            response["Content-Security-Policy"] = "default-src 'none'"
+
+        # Prevent browsers from auto-detecting the content-type of a document
+        response["X-Content-Type-Options"] = "nosniff"
+
+        response["Etag"] = quote_etag(document.file_hash)
+
+        if self.sendfile_cache_control_headers:
+            patch_cache_control(response, **self.sendfile_cache_control_headers)
+
+        return response
+
+    def serve(self, document: "AbstractDocument") -> FileResponse:
+        document.file.open("rb")
+        response = FileResponse(document.file, document.content_type)
+
+        # Set Content-Length header from populated model field
+        response["Content-Length"] = document.file_size
 
         # set filename and filename* to handle non-ascii characters in filename
         # see https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Disposition
-        response["Content-Disposition"] = doc.content_disposition
+        response["Content-Disposition"] = document.content_disposition
 
-        # FIXME: storage backends are not guaranteed to implement 'size'
-        response["Content-Length"] = doc.file.size
+        if self.prevent_inline_execution:
+            # Add a CSP header to prevent inline execution
+            response["Content-Security-Policy"] = "default-src 'none'"
 
-    # Add a CSP header to prevent inline execution
-    if getattr(settings, "WAGTAILDOCS_BLOCK_EMBEDDED_CONTENT", True):
-        response["Content-Security-Policy"] = "default-src 'none'"
+        # Prevent browsers from auto-detecting the content-type of a document
+        response["X-Content-Type-Options"] = "nosniff"
 
-    # Prevent browsers from auto-detecting the content-type of a document
-    response["X-Content-Type-Options"] = "nosniff"
+        response["Etag"] = quote_etag(document.file_hash)
 
-    return response
+        if self.serve_cache_control_headers:
+            patch_cache_control(response, **self.serve_cache_control_headers)
+
+        return response
+
+
+serve = ServeView.as_view()
 
 
 def authenticate_with_password(request, restriction_id):
