@@ -92,10 +92,9 @@ class Migration(migrations.Migration):
             },
         ),
         migrations.RunPython(
-            add_choose_permission_to_admin_groups, remove_choose_permission
+            add_choose_permission_to_admin_groups, migrations.RunPython.noop
         ),
         migrations.RunPython(
-            copy_choose_permission_to_collections,
-            remove_choose_permission_from_collections,
+            copy_choose_permission_to_collections, migrations.RunPython.noop
         ),
     ]
