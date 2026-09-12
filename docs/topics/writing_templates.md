@@ -156,6 +156,8 @@ On multi-site sites, page links inside rich text need the current request so the
 {% richtext page.body %}
 ```
 
+`RichTextBlock` values (including those nested in StreamField, ListBlock, or `{% include_block %}`) use the same expansion when a request is in the template context, so custom block templates that output `{{ value }}` get the same page URLs.
+
 (responsive_embeds)=
 
 ### Responsive Embeds

@@ -829,6 +829,17 @@ class RichTextBlock(FieldBlock):
         # Extracts any references to images/pages/embeds
         yield from extract_references_from_rich_text(force_str(value.source))
 
+    def get_context(self, value, parent_context=None):
+        context = super().get_context(value, parent_context)
+        request = context.get("request")
+        if request is not None and value:
+            # So {{ value }} / {{ self }} in a custom template expand the same
+            # way as render_basic / RichText.render(request=...).
+            bound = value.bind_request(request)
+            context["self"] = bound
+            context[self.TEMPLATE_VAR] = bound
+        return context
+
     def render_basic(self, value, context=None):
         if not value:
             return ""

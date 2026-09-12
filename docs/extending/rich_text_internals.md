@@ -29,7 +29,7 @@ Here, the `linktype` attribute identifies a rule that shall be used to rewrite t
 <p><a href="/contact-us/">Contact us</a> for more information.</p>
 ```
 
-In the case of `RichTextBlock`, the block's value is a `RichText` object which performs this conversion automatically when rendered as a string, so the `|richtext` filter is not necessary.
+In the case of `RichTextBlock`, the block's value is a `RichText` object which performs this conversion automatically when rendered as a string, so the `|richtext` filter is not necessary. When the block is rendered through StreamField / `{% include_block %}` with a request in context, that request is passed to the same expansion used by `expand_db_html` and `{% richtext %}` (including custom templates that output `{{ value }}`).
 
 Likewise, an image inside rich text content might be stored as:
 

@@ -1016,6 +1016,34 @@ class TestRichTextBlock(PageFixturesMixin, TestCase):
         request = get_dummy_request(path="/?rich_text_format=html")
         result = block.get_api_representation(value, context={"request": request})
         self.assertIn('href="/events/christmas/"', result)
+
+    def test_custom_template_value_uses_bound_request(self):
+        page = Page.objects.get(url_path="/home/events/christmas/")
+        block = blocks.RichTextBlock(template="tests/blocks/rich_text_value.html")
+        value = RichText(f'<a id="{page.id}" linktype="page">Christmas</a>')
+        request = get_dummy_request()
+        result = block.render(value, context={"request": request})
+        self.assertIn('href="/events/christmas/"', result)
+        self.assertNotIn("&lt;a", result)
+
+    def test_struct_block_include_block_passes_request_to_rich_text(self):
+        page = Page.objects.get(url_path="/home/events/christmas/")
+
+        class ArticleBlock(blocks.StructBlock):
+            body = blocks.RichTextBlock()
+
+        struct_block = ArticleBlock()
+        value = struct_block.to_python(
+            {"body": f'<a id="{page.id}" linktype="page">Christmas</a>'}
+        )
+        request = get_dummy_request()
+        result = render_to_string(
+            "tests/blocks/include_block_test.html",
+            {"test_block": value.bound_blocks["body"], "request": request},
+        )
+        self.assertIn('href="/events/christmas/"', result)
+
+    def test_normalize(self):
         block = blocks.RichTextBlock()
         for value in ("Hello, world", RichText("Hello, world")):
             with self.subTest(value=value):

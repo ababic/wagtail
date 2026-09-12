@@ -95,13 +95,28 @@ class RichText:
 
     def __init__(self, source):
         self.source = source or ""
+        self._request = None
+
+    def bind_request(self, request):
+        """
+        Return a copy that expands using ``request`` when rendered as a string.
+
+        Used by ``RichTextBlock`` so custom templates that output ``{{ value }}``
+        (or ``{{ self }}``) hit the same expansion as ``render(request=...)``.
+        """
+        bound = type(self)(self.source)
+        bound._request = request
+        return bound
 
     def render(self, request=None):
         """
         Expand this value to front-end HTML.
 
         Pass ``request`` so page links resolve against the current site.
+        If omitted, a request previously bound via :meth:`bind_request` is used.
         """
+        if request is None:
+            request = self._request
         return render_to_string(
             "wagtailcore/shared/richtext.html",
             {"html": expand_db_html(self.source, request=request)},
