@@ -6,7 +6,6 @@ import swapper
 from django import VERSION as DJANGO_VERSION
 from django import forms
 from django.db.models import Model
-from django.template.loader import render_to_string
 from django.utils.choices import CallableChoiceIterator
 from django.utils.dateparse import parse_date, parse_datetime, parse_time
 from django.utils.encoding import force_str
@@ -24,7 +23,6 @@ from wagtail.rich_text import (
     RichText,
     RichTextMaxLengthValidator,
     RichTextMinLengthValidator,
-    expand_db_html,
     extract_references_from_rich_text,
     get_text_for_indexing,
 )
@@ -788,11 +786,14 @@ class RichTextBlock(FieldBlock):
         return value.source
 
     def get_api_representation(self, value, context=None):
+        request = context.get("request") if context else None
         rich_text_format = None
-        if request := (context and context.get("request")):
+        if request:
             rich_text_format = request.GET.get("rich_text_format")
         rich_text_format = APIRichText.resolve_format(rich_text_format)
-        return APIRichText.serialize(value.source, format=rich_text_format)
+        return APIRichText.serialize(
+            value.source, format=rich_text_format, request=request
+        )
 
     def normalize(self, value):
         if isinstance(value, RichText):
@@ -832,8 +833,7 @@ class RichTextBlock(FieldBlock):
         if not value:
             return ""
         request = context.get("request") if context else None
-        html = expand_db_html(value.source, request=request)
-        return render_to_string("wagtailcore/shared/richtext.html", {"html": html})
+        return mark_safe(value.render(request=request))  # noqa: S308
 
     class Meta:
         icon = "pilcrow"

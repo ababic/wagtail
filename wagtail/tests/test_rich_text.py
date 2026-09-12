@@ -322,6 +322,14 @@ class TestRichTextValue(PageFixturesMixin, TestCase):
             result, '<p>Merry <a href="/events/christmas/">Christmas</a>!</p>'
         )
 
+    def test_render_with_request(self):
+        value = RichText('<p>Merry <a linktype="page" id="4">Christmas</a>!</p>')
+        request = get_dummy_request()
+        result = value.render(request=request)
+        self.assertEqual(
+            result, '<p>Merry <a href="/events/christmas/">Christmas</a>!</p>'
+        )
+
     def test_evaluate_value(self):
         value = RichText(None)
         self.assertFalse(value)

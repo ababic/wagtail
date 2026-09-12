@@ -96,10 +96,19 @@ class RichText:
     def __init__(self, source):
         self.source = source or ""
 
-    def __html__(self):
+    def render(self, request=None):
+        """
+        Expand this value to front-end HTML.
+
+        Pass ``request`` so page links resolve against the current site.
+        """
         return render_to_string(
-            "wagtailcore/shared/richtext.html", {"html": expand_db_html(self.source)}
+            "wagtailcore/shared/richtext.html",
+            {"html": expand_db_html(self.source, request=request)},
         )
+
+    def __html__(self):
+        return self.render()
 
     def __str__(self):
         return mark_safe(self.__html__())  # noqa: S308 - needs to be safe

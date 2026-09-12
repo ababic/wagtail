@@ -127,7 +127,7 @@ def render_richtext(value, request=None):
         if request is None:
             # passing a RichText value through the |richtext filter should have no effect
             return value
-        html = expand_db_html(value.source, request=request)
+        return value.render(request=request)
     elif value is None:
         html = ""
     else:

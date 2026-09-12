@@ -283,7 +283,11 @@ class RichTextFieldSerializer(serializers.CharField):
             rich_text_format = APIRichText.resolve_format(raw)
             self.context["_wagtail_rich_text_format"] = rich_text_format
         representation = super().to_representation(value)
-        return APIRichText.serialize(representation, format=rich_text_format)
+        return APIRichText.serialize(
+            representation,
+            format=rich_text_format,
+            request=self.context.get("request"),
+        )
 
 
 class TagsField(Field):
