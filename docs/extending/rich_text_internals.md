@@ -69,6 +69,9 @@ from wagtail.rich_text import expand_db_html
 
 # Converts the stored rich text data format to HTML suitable for rendering.
 expand_db_html(page.body)
+
+# Pass request so page links resolve against the current site (multi-site).
+expand_db_html(page.body, request=request)
 ```
 
 ## The feature registry
@@ -113,9 +116,11 @@ You can create custom rewrite handlers to support your own new `linktype` and `e
 
         Either this method or ``expand_db_attributes_many`` must be defined in a custom rewrite handler.
 
-    .. method:: expand_db_attributes_many(attrs_list)
+    .. method:: expand_db_attributes_many(attrs_list, request=None)
 
         Optional. The ``expand_db_attributes_many`` method works similarly to ``expand_db_attributes`` but instead takes a list of attribute dictionaries and returns a list of HTML tags. This method is used by rewrite handlers to work in bulk, for example leveraging the ability to make one database query instead of multiple.
+
+        ``request`` is passed when expanding HTML that has a current HTTP request (from ``expand_db_html(html, request=request)``, the ``{% richtext %}`` tag, or ``{{ value|richtext:request }}``). Handlers that generate page URLs can use it to pick the correct site. Custom handlers that do not accept ``request`` continue to work.
 
         Either this method or ``expand_db_attributes`` must be defined in a custom rewrite handler. If not defined, the default implementation of ``expand_db_attributes_many`` works by making a series of calls to ``expand_db_attributes``.
 

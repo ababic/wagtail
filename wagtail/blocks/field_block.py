@@ -6,6 +6,7 @@ import swapper
 from django import VERSION as DJANGO_VERSION
 from django import forms
 from django.db.models import Model
+from django.template.loader import render_to_string
 from django.utils.choices import CallableChoiceIterator
 from django.utils.dateparse import parse_date, parse_datetime, parse_time
 from django.utils.encoding import force_str
@@ -23,6 +24,7 @@ from wagtail.rich_text import (
     RichText,
     RichTextMaxLengthValidator,
     RichTextMinLengthValidator,
+    expand_db_html,
     extract_references_from_rich_text,
     get_text_for_indexing,
 )
@@ -825,6 +827,13 @@ class RichTextBlock(FieldBlock):
     def extract_references(self, value):
         # Extracts any references to images/pages/embeds
         yield from extract_references_from_rich_text(force_str(value.source))
+
+    def render_basic(self, value, context=None):
+        if not value:
+            return ""
+        request = context.get("request") if context else None
+        html = expand_db_html(value.source, request=request)
+        return render_to_string("wagtailcore/shared/richtext.html", {"html": html})
 
     class Meta:
         icon = "pilcrow"

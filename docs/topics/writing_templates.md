@@ -148,6 +148,14 @@ Only fields using `RichTextField` need this applied in the template.
 {{ page.body|richtext }}
 ```
 
+On multi-site sites, page links inside rich text need the current request so they resolve against the correct hostname and language prefix. Pass it to the filter, or use the `{% richtext %}` tag (which takes the request from the template context automatically):
+
+```html+django
+{% load wagtailcore_tags %}
+{{ page.body|richtext:request }}
+{% richtext page.body %}
+```
+
 (responsive_embeds)=
 
 ### Responsive Embeds

@@ -29,6 +29,7 @@ from wagtail.blocks.struct_block import (
     StructBlockAdapter,
     StructBlockValidationError,
 )
+from wagtail.coreutils import get_dummy_request
 from wagtail.rich_text import RichText
 from wagtail.test.testapp.blocks import LinkBlock as CustomLinkBlock
 from wagtail.test.testapp.blocks import SectionBlock
@@ -953,6 +954,14 @@ class TestRichTextBlock(PageFixturesMixin, TestCase):
         value = RichText('<a linktype="page" id="1">Link to an internal page</a>')
 
         self.assertEqual(list(block.extract_references(value)), [(Page, "1", "", "")])
+
+    def test_render_basic_passes_request_from_context(self):
+        block = blocks.RichTextBlock()
+        page = Page.objects.get(url_path="/home/events/christmas/")
+        value = RichText(f'<a id="{page.id}" linktype="page">Christmas</a>')
+        request = get_dummy_request()
+        result = block.render_basic(value, context={"request": request})
+        self.assertIn('href="/events/christmas/"', result)
 
     def test_normalize(self):
         block = blocks.RichTextBlock()
