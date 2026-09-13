@@ -178,7 +178,7 @@ Transform Wagtail's internal HTML representation, expanding internal references 
 {{ page.body|richtext }}
 ```
 
-See [](rich_text_filter) for more information
+See [](rich_text_filter) for more information.
 
 ### `wagtail_site`
 
