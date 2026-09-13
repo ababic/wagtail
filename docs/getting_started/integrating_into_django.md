@@ -35,7 +35,7 @@ In your settings.py file, add the following apps to `INSTALLED_APPS`:
 ("taggit",)
 ```
 
-Add the following entry to `MIDDLEWARE`:
+Add the following entries to `MIDDLEWARE`:
 
 ```python
 ("wagtail.contrib.redirects.middleware.RedirectMiddleware",)

@@ -148,6 +148,14 @@ Only fields using `RichTextField` need this applied in the template.
 {{ page.body|richtext }}
 ```
 
+```{note}
+The `|richtext` filter cannot receive the current HTTP request: Django template filters do not have access to the template context. On multi-site sites, page links in `{{ page.body|richtext }}` resolve against the current site when the template is rendered through Wagtail's page serve or preview views.
+
+For other templates, pass `request` to `expand_db_html()` from Python, or render the value through `RichTextBlock` / `{% include_block %}` so the request is available.
+```
+
+`RichTextBlock` values (including those nested in StreamField, ListBlock, or `{% include_block %}`) use the same expansion as `expand_db_html(..., request=request)` when a request is in the template context, so custom block templates that output `{{ value }}` get the same page URLs.
+
 (responsive_embeds)=
 
 ### Responsive Embeds

@@ -347,7 +347,7 @@ def rich_text_schema(generator: SchemaGenerator, field: Field) -> FieldSchema:
             request.GET.get("rich_text_format") if request else None
         )
         return APIRichText.serialize(
-            value, format=rich_text_format, features=field.features
+            value, format=rich_text_format, features=field.features, request=request
         )
 
     default = FieldInfo(

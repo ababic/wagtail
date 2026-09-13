@@ -121,6 +121,32 @@ class TestJinjaEscaping(PageFixturesMixin, TestCase):
             '<p>Merry <a href="/events/christmas/">Christmas</a>!</p>', result
         )
 
+    def test_rich_text_custom_template_uses_request_from_context(self):
+        stream_block = blocks.StreamBlock(
+            [
+                (
+                    "paragraph",
+                    blocks.RichTextBlock(template="tests/jinja2/rich_text.html"),
+                )
+            ]
+        )
+        stream_value = stream_block.to_python(
+            [
+                {
+                    "type": "paragraph",
+                    "value": '<p>Merry <a linktype="page" id="4">Christmas</a>!</p>',
+                },
+            ]
+        )
+        request = get_dummy_request()
+        result = render_to_string(
+            "tests/jinja2/include_block_test.html",
+            {"test_block": stream_value, "request": request},
+        )
+        self.assertIn(
+            '<p>Merry <a href="/events/christmas/">Christmas</a>!</p>', result
+        )
+
 
 class TestIncludeBlockTag(TestCase):
     def test_include_block_tag_with_boundblock(self):
