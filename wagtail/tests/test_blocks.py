@@ -29,6 +29,7 @@ from wagtail.blocks.struct_block import (
     StructBlockAdapter,
     StructBlockValidationError,
 )
+from wagtail.coreutils import get_dummy_request
 from wagtail.rich_text import RichText
 from wagtail.test.testapp.blocks import LinkBlock as CustomLinkBlock
 from wagtail.test.testapp.blocks import SectionBlock
