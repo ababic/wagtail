@@ -218,7 +218,7 @@ class Site(models.Model):
                 )
 
     @staticmethod
-    def get_site_root_paths():
+    def get_site_root_paths(request=None):
         """
         Return a list of `SiteRootPath` instances, most specific path
         first - used to translate url_paths into actual URLs with hostnames.
@@ -230,7 +230,17 @@ class Site(models.Model):
         - ``root_path`` - The internal URL path of the site's home page (for example '/home/')
         - ``root_url`` - The scheme/domain name of the site (for example 'https://www.example.com/')
         - ``language_code`` - The language code of the site (for example 'en')
+
+        When ``request`` is provided, the result is cached on
+        ``request._wagtail_cached_site_root_paths`` for reuse within the same
+        request (for example by ``Page.get_url_parts()``).
         """
+        if request is not None:
+            try:
+                return request._wagtail_cached_site_root_paths
+            except AttributeError:
+                pass
+
         result = cache.get(
             SITE_ROOT_PATHS_CACHE_KEY, version=SITE_ROOT_PATHS_CACHE_VERSION
         )
@@ -276,6 +286,9 @@ class Site(models.Model):
             # Convert the cache result to a list of SiteRootPath tuples, as some
             # cache backends (e.g. Redis) don't support named tuples.
             result = [SiteRootPath(*result) for result in result]
+
+        if request is not None:
+            request._wagtail_cached_site_root_paths = result
 
         return result
 

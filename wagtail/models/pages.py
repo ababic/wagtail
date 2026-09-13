@@ -1391,11 +1391,7 @@ class AbstractPage(
             cache_object = cache_object or kwargs["request"]
         # if we have a cache_object, use that to cache site_root_paths; otherwise, use self
         cache_object = cache_object if cache_object else self
-        try:
-            return cache_object._wagtail_cached_site_root_paths
-        except AttributeError:
-            cache_object._wagtail_cached_site_root_paths = Site.get_site_root_paths()
-            return cache_object._wagtail_cached_site_root_paths
+        return Site.get_site_root_paths(request=cache_object)
 
     def _get_relevant_site_root_paths(self, cache_object=None):
         """
