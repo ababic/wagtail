@@ -39,6 +39,9 @@ class TestWagtailSiteStashScope(PageFixturesMixin, TestCase):
 class TestBindSiteStashOnRender(PageFixturesMixin, TestCase):
     fixtures = ["test.json"]
 
+    def tearDown(self):
+        translation.deactivate()
+
     def setUp(self):
         self.en_site = Site.objects.get(is_default_site=True)
         self.en_site.hostname = "en.example.com"

@@ -7,7 +7,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import translation
 
 from wagtail.coreutils import get_dummy_request
-from wagtail.models import Locale, Page, Site, get_current_site
+from wagtail.models import Locale, Site, get_current_site
 from wagtail.models.sites import (
     SITE_ROOT_PATHS_CACHE_KEY,
     SITE_ROOT_PATHS_CACHE_VERSION,
@@ -17,13 +17,18 @@ from wagtail.models.sites import (
     wagtail_site_stash_scope,
 )
 from wagtail.rich_text import expand_db_html
-from wagtail.test.utils import PageFixturesMixin
+from wagtail.test.utils import Page, PageFixturesMixin
 from wagtail.utils.stash import get as stash_get
 
 
 def _run_with_site_scope(request, view, site=None):
     with wagtail_site_stash_scope(request, site=site):
         return view(request)
+
+
+class TranslationCleanupMixin:
+    def tearDown(self):
+        translation.deactivate()
 
 
 @override_settings(
@@ -230,7 +235,7 @@ class TestGetUrlPartsUsesStashedSite(PageFixturesMixin, TestCase):
     ],
     ROOT_URLCONF="wagtail.test.urls_multilang",
 )
-class TestRichTextUsesStashedSite(PageFixturesMixin, TestCase):
+class TestRichTextUsesStashedSite(TranslationCleanupMixin, PageFixturesMixin, TestCase):
     fixtures = ["test.json"]
 
     def setUp(self):
@@ -285,7 +290,7 @@ class TestRichTextUsesStashedSite(PageFixturesMixin, TestCase):
     ],
     ROOT_URLCONF="wagtail.test.urls_multilang",
 )
-class TestPreviewSiteScope(PageFixturesMixin, TestCase):
+class TestPreviewSiteScope(TranslationCleanupMixin, PageFixturesMixin, TestCase):
     fixtures = ["test.json"]
 
     def setUp(self):
