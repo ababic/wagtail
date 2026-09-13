@@ -375,6 +375,20 @@ class TestSiteRootPathsCache(PageFixturesMixin, TestCase):
         # Check that the cache has been cleared
         self.assertIsNone(self.get_cached_site_root_paths())
 
+    def test_cache_clears_when_site_root_page_deleted(self):
+        """
+        This tests that the cache is cleared whenever a site root page is deleted.
+        """
+        homepage = Page.objects.get(url_path="/home/")
+
+        _ = homepage.url
+
+        self.assertIsNotNone(self.get_cached_site_root_paths())
+
+        homepage.delete()
+
+        self.assertIsNone(self.get_cached_site_root_paths())
+
     def test_cache_clears_when_site_deleted(self):
         """
         This tests that the cache is cleared whenever a site is deleted
