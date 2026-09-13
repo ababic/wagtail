@@ -1,6 +1,26 @@
 from ninja import Field, Schema
 
 
+class SiteRootUrlSchema(Schema):
+    language_code: str
+    page_id: int
+    html_url: str | None
+
+
+class SiteRootSchema(Schema):
+    id: int
+    hostname: str
+    port: int
+    site_name: str
+    is_default_site: bool
+    urls: list[SiteRootUrlSchema]
+
+
+class SiteRootsListSchema(Schema):
+    count: int
+    items: list[SiteRootSchema]
+
+
 class SiteSchema(Schema):
     id: int
     hostname: str
