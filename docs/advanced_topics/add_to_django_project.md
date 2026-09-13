@@ -37,7 +37,7 @@ MIDDLEWARE = [
 ]
 ```
 
-Wagtail depends on the default set of Django middleware modules, to cover basic security and functionality such as login sessions. One additional middleware module is provided:
+Wagtail depends on the default set of Django middleware modules, to cover basic security and functionality such as login sessions. An additional middleware module is provided:
 
 **`RedirectMiddleware`**  
  Wagtail provides a simple interface for adding arbitrary redirects to your site and this module makes it happen.
