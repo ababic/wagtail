@@ -225,6 +225,38 @@ class TestGetUrlPartsUsesStashedSite(PageFixturesMixin, TestCase):
         )
         self.assertEqual(captured["url"], "/christmas/")
 
+    def test_multiple_page_url_resolutions_reuse_stashed_values(self):
+        events_index = Page.objects.get(url_path="/home/events/")
+        cache.delete(SITE_ROOT_PATHS_CACHE_KEY, version=SITE_ROOT_PATHS_CACHE_VERSION)
+        request = get_dummy_request(site=self.second_events_site)
+
+        with wagtail_site_stash_scope(request):
+            self.christmas_page.get_url_parts()
+            with CaptureQueriesContext(connection) as ctx:
+                self.christmas_page.get_url_parts()
+                events_index.get_url_parts()
+                self.christmas_page.get_url()
+                events_index.get_url()
+
+        self.assertEqual(len(ctx), 0)
+
+    def test_injected_site_scope_reuses_values_for_multiple_page_urls(self):
+        events_index = Page.objects.get(url_path="/home/events/")
+        cache.delete(SITE_ROOT_PATHS_CACHE_KEY, version=SITE_ROOT_PATHS_CACHE_VERSION)
+        site, site_root_paths = find_site_scope_for_page(self.christmas_page)
+        request = get_dummy_request(site=self.events_site)
+
+        with wagtail_site_stash_scope(
+            request, site=site, site_root_paths=site_root_paths
+        ):
+            with CaptureQueriesContext(connection) as ctx:
+                self.christmas_page.get_url_parts()
+                events_index.get_url_parts()
+                self.christmas_page.get_url()
+                events_index.get_url()
+
+        self.assertEqual(len(ctx), 0)
+
 
 @override_settings(
     ALLOWED_HOSTS=["localhost", "testserver", "en.example.com", "fr.example.com"],
