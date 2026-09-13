@@ -17,6 +17,7 @@ redirects
 streamfield
 rich_text
 sites
+site_roots
 locales
 schema
 reference
@@ -68,7 +69,7 @@ The v3 API reads the same `WAGTAILAPI_*` settings as v2 where applicable (`WAGTA
 The v3 API supports a wide range of CMS operations, largely covering the same functionality as the Wagtail admin interface. This includes:
 
 - Pages, including drafts, revisions, and page actions.
-- Sites, locales, and redirects.
+- Sites, site roots, locales, and redirects.
 - Images and documents.
 - API-enabled snippets.
 - Rich text in HTML and Markdown.
