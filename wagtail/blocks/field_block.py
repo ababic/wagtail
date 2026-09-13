@@ -786,11 +786,14 @@ class RichTextBlock(FieldBlock):
         return value.source
 
     def get_api_representation(self, value, context=None):
+        request = context.get("request") if context else None
         rich_text_format = None
-        if request := (context and context.get("request")):
+        if request:
             rich_text_format = request.GET.get("rich_text_format")
         rich_text_format = APIRichText.resolve_format(rich_text_format)
-        return APIRichText.serialize(value.source, format=rich_text_format)
+        return APIRichText.serialize(
+            value.source, format=rich_text_format, request=request
+        )
 
     def normalize(self, value):
         if isinstance(value, RichText):
@@ -825,6 +828,23 @@ class RichTextBlock(FieldBlock):
     def extract_references(self, value):
         # Extracts any references to images/pages/embeds
         yield from extract_references_from_rich_text(force_str(value.source))
+
+    def get_context(self, value, parent_context=None):
+        context = super().get_context(value, parent_context)
+        request = context.get("request")
+        if request is not None and value:
+            # So {{ value }} / {{ self }} in a custom template expand the same
+            # way as render_basic / RichText.render(request=...).
+            bound = value.bind_request(request)
+            context["self"] = bound
+            context[self.TEMPLATE_VAR] = bound
+        return context
+
+    def render_basic(self, value, context=None):
+        if not value:
+            return ""
+        request = context.get("request") if context else None
+        return mark_safe(value.render(request=request))  # noqa: S308
 
     class Meta:
         icon = "pilcrow"

@@ -93,6 +93,7 @@ class APIRichText:
         *,
         format: RichTextOutputFormat,
         features: list[str] | None = None,
+        request=None,
     ) -> Any:
         """
         Serialize ``value`` using a previously validated ``format``.
@@ -101,13 +102,16 @@ class APIRichText:
         came from; only formats that convert through the ContentState
         pipeline (``db_markdown``, ``markdown``) use it.
 
+        ``request`` is passed through when expanding display HTML so page
+        links resolve against the current site.
+
         Callers must resolve the format via :meth:`resolve_format` (or
         :meth:`check_setting` for the project default) before calling this.
         """
         if value is None:
             return None
 
-        return cls._serializers()[format](value, features=features)
+        return cls._serializers()[format](value, features=features, request=request)
 
     @classmethod
     def parse_input(cls, value: str | dict) -> tuple[RichTextInputFormat, str]:
@@ -212,22 +216,30 @@ class APIRichText:
         }
 
     @staticmethod
-    def _serialize_db_html(value: str, *, features: list[str] | None = None) -> str:
+    def _serialize_db_html(
+        value: str, *, features: list[str] | None = None, request=None
+    ) -> str:
         return value
 
     @staticmethod
-    def _serialize_html(value: str, *, features: list[str] | None = None) -> str:
-        return expand_db_html(value)
+    def _serialize_html(
+        value: str, *, features: list[str] | None = None, request=None
+    ) -> str:
+        return expand_db_html(value, request=request)
 
     @staticmethod
-    def _serialize_db_markdown(value: str, *, features: list[str] | None = None) -> str:
+    def _serialize_db_markdown(
+        value: str, *, features: list[str] | None = None, request=None
+    ) -> str:
         # Lazy import: wagtail.api must stay importable without wagtail.admin.
         from wagtail.admin.rich_text.converters.markdown_db import MarkdownConverter
 
         return MarkdownConverter(features).from_database_format(value, resolved=False)
 
     @staticmethod
-    def _serialize_markdown(value: str, *, features: list[str] | None = None) -> str:
+    def _serialize_markdown(
+        value: str, *, features: list[str] | None = None, request=None
+    ) -> str:
         # Lazy import: wagtail.api must stay importable without wagtail.admin.
         from wagtail.admin.rich_text.converters.markdown_db import MarkdownConverter
 

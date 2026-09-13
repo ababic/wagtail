@@ -29,6 +29,7 @@ from wagtail.blocks.struct_block import (
     StructBlockAdapter,
     StructBlockValidationError,
 )
+from wagtail.coreutils import get_dummy_request
 from wagtail.rich_text import RichText
 from wagtail.test.testapp.blocks import LinkBlock as CustomLinkBlock
 from wagtail.test.testapp.blocks import SectionBlock
@@ -953,6 +954,94 @@ class TestRichTextBlock(PageFixturesMixin, TestCase):
         value = RichText('<a linktype="page" id="1">Link to an internal page</a>')
 
         self.assertEqual(list(block.extract_references(value)), [(Page, "1", "", "")])
+
+    def test_render_basic_passes_request_from_context(self):
+        block = blocks.RichTextBlock()
+        page = Page.objects.get(url_path="/home/events/christmas/")
+        value = RichText(f'<a id="{page.id}" linktype="page">Christmas</a>')
+        request = get_dummy_request()
+        result = block.render_basic(value, context={"request": request})
+        self.assertIn('href="/events/christmas/"', result)
+
+    def test_render_passes_request_from_context(self):
+        block = blocks.RichTextBlock()
+        page = Page.objects.get(url_path="/home/events/christmas/")
+        value = RichText(f'<a id="{page.id}" linktype="page">Christmas</a>')
+        request = get_dummy_request()
+        result = block.render(value, context={"request": request})
+        self.assertIn('href="/events/christmas/"', result)
+
+    def test_stream_block_render_passes_request_to_rich_text(self):
+        page = Page.objects.get(url_path="/home/events/christmas/")
+        stream_block = blocks.StreamBlock([("text", blocks.RichTextBlock())])
+        value = stream_block.to_python(
+            [
+                {
+                    "type": "text",
+                    "value": f'<a id="{page.id}" linktype="page">Christmas</a>',
+                }
+            ]
+        )
+        request = get_dummy_request()
+        result = stream_block.render(value, context={"request": request})
+        self.assertIn('href="/events/christmas/"', result)
+        self.assertNotIn("&lt;a", result)
+
+    def test_list_block_render_passes_request_to_rich_text(self):
+        page = Page.objects.get(url_path="/home/events/christmas/")
+        list_block = blocks.ListBlock(blocks.RichTextBlock())
+        value = list_block.to_python(
+            [f'<a id="{page.id}" linktype="page">Christmas</a>']
+        )
+        request = get_dummy_request()
+        result = list_block.render(value, context={"request": request})
+        self.assertIn('href="/events/christmas/"', result)
+        self.assertNotIn("&lt;a", result)
+
+    def test_include_block_passes_request_to_rich_text(self):
+        page = Page.objects.get(url_path="/home/events/christmas/")
+        block = blocks.RichTextBlock()
+        value = block.bind(RichText(f'<a id="{page.id}" linktype="page">Christmas</a>'))
+        request = get_dummy_request()
+        result = render_to_string(
+            "tests/blocks/include_block_test.html",
+            {"test_block": value, "request": request},
+        )
+        self.assertIn('href="/events/christmas/"', result)
+
+    def test_get_api_representation_passes_request(self):
+        block = blocks.RichTextBlock()
+        page = Page.objects.get(url_path="/home/events/christmas/")
+        value = RichText(f'<a id="{page.id}" linktype="page">Christmas</a>')
+        request = get_dummy_request(path="/?rich_text_format=html")
+        result = block.get_api_representation(value, context={"request": request})
+        self.assertIn('href="/events/christmas/"', result)
+
+    def test_custom_template_value_uses_bound_request(self):
+        page = Page.objects.get(url_path="/home/events/christmas/")
+        block = blocks.RichTextBlock(template="tests/blocks/rich_text_value.html")
+        value = RichText(f'<a id="{page.id}" linktype="page">Christmas</a>')
+        request = get_dummy_request()
+        result = block.render(value, context={"request": request})
+        self.assertIn('href="/events/christmas/"', result)
+        self.assertNotIn("&lt;a", result)
+
+    def test_struct_block_include_block_passes_request_to_rich_text(self):
+        page = Page.objects.get(url_path="/home/events/christmas/")
+
+        class ArticleBlock(blocks.StructBlock):
+            body = blocks.RichTextBlock()
+
+        struct_block = ArticleBlock()
+        value = struct_block.to_python(
+            {"body": f'<a id="{page.id}" linktype="page">Christmas</a>'}
+        )
+        request = get_dummy_request()
+        result = render_to_string(
+            "tests/blocks/include_block_test.html",
+            {"test_block": value.bound_blocks["body"], "request": request},
+        )
+        self.assertIn('href="/events/christmas/"', result)
 
     def test_normalize(self):
         block = blocks.RichTextBlock()
