@@ -4,6 +4,7 @@ from django.forms.models import modelform_factory
 from django.test import TestCase, override_settings
 from django.utils import translation
 
+from wagtail.coreutils import get_dummy_request
 from wagtail.fields import RichTextField
 from wagtail.models import Locale, Site
 from wagtail.rich_text import (
@@ -78,6 +79,64 @@ class TestPageLinktypeHandlerWithI18N(PageFixturesMixin, TestCase):
         with translation.override("fr"):
             result = PageLinkHandler.expand_db_attributes({"id": self.event_page.id})
             self.assertEqual(result, '<a href="/en/events/christmas/">')
+
+
+@override_settings(
+    ALLOWED_HOSTS=["localhost", "testserver", "en.example.com", "fr.example.com"],
+    WAGTAIL_I18N_ENABLED=True,
+    WAGTAIL_CONTENT_LANGUAGES=[
+        ("en", "English"),
+        ("fr", "French"),
+    ],
+    ROOT_URLCONF="wagtail.test.urls_multilang",
+)
+class TestPageLinkHandlerMultiSite(PageFixturesMixin, TestCase):
+    fixtures = ["test.json"]
+
+    def setUp(self):
+        self.en_site = Site.objects.get(is_default_site=True)
+        self.en_site.hostname = "en.example.com"
+        self.en_site.save()
+
+        homepage = Page.objects.get(url_path="/home/")
+        self.fr_locale = Locale.objects.create(language_code="fr")
+        self.fr_homepage = homepage.copy_for_translation(self.fr_locale)
+        self.fr_homepage.save_revision().publish()
+        self.fr_site = Site.objects.create(
+            hostname="fr.example.com",
+            root_page=self.fr_homepage,
+        )
+
+        self.event_page = Page.objects.get(url_path="/home/events/christmas/")
+        self.fr_event_page = self.event_page.copy_for_translation(
+            self.fr_locale, copy_parents=True
+        )
+        self.fr_event_page.slug = "noel"
+        self.fr_event_page.save(update_fields=["slug"])
+        self.fr_event_page.save_revision().publish()
+        Site.clear_site_root_paths_cache()
+
+        self.link_html = f'<a id="{self.event_page.id}" linktype="page">Christmas</a>'
+
+    def _expand(self, request=None, language="en"):
+        with translation.override(language):
+            return expand_db_html(self.link_html, request=request)
+
+    def test_expand_with_request_uses_current_site(self):
+        en_request = get_dummy_request(site=self.en_site)
+        fr_request = get_dummy_request(site=self.fr_site)
+
+        en_html = self._expand(request=en_request, language="en")
+        fr_html = self._expand(request=fr_request, language="fr")
+
+        self.assertIn('href="/en/events/christmas/"', en_html)
+        self.assertIn('href="/fr/events/noel/"', fr_html)
+        self.assertNotIn("fr.example.com", en_html)
+        self.assertNotIn("en.example.com", fr_html)
+
+    def test_expand_without_request_keeps_legacy_behaviour(self):
+        result = PageLinkHandler.expand_db_attributes({"id": self.event_page.id})
+        self.assertTrue(result.startswith("<a href="))
 
 
 class TestExtractAttrs(TestCase):
@@ -240,6 +299,24 @@ class TestRichTextValue(PageFixturesMixin, TestCase):
         result = str(value)
         self.assertEqual(
             result, '<p>Merry <a href="/events/christmas/">Christmas</a>!</p>'
+        )
+
+    def test_render_with_request(self):
+        value = RichText('<p>Merry <a linktype="page" id="4">Christmas</a>!</p>')
+        request = get_dummy_request()
+        result = value.render(request=request)
+        self.assertEqual(
+            result, '<p>Merry <a href="/events/christmas/">Christmas</a>!</p>'
+        )
+
+    def test_bind_request_used_when_rendered_as_string(self):
+        value = RichText('<p>Merry <a linktype="page" id="4">Christmas</a>!</p>')
+        bound = value.bind_request(get_dummy_request())
+        self.assertEqual(value.source, bound.source)
+        self.assertIsNot(value, bound)
+        self.assertEqual(
+            str(bound),
+            '<p>Merry <a href="/events/christmas/">Christmas</a>!</p>',
         )
 
     def test_evaluate_value(self):

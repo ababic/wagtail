@@ -9,7 +9,12 @@ from django.utils.html import strip_tags
 from django.utils.safestring import mark_safe
 
 from wagtail.rich_text.feature_registry import FeatureRegistry
-from wagtail.rich_text.rewriters import EmbedRewriter, LinkRewriter, MultiRuleRewriter
+from wagtail.rich_text.rewriters import (
+    EmbedRewriter,
+    LinkRewriter,
+    MultiRuleRewriter,
+    bind_expand_many,
+)
 
 features = FeatureRegistry()
 
@@ -27,7 +32,7 @@ def get_rewriter():
         [
             LinkRewriter(
                 bulk_rules={
-                    linktype: handler.expand_db_attributes_many
+                    linktype: bind_expand_many(handler.expand_db_attributes_many)
                     for linktype, handler in link_rules.items()
                 },
                 reference_extractors={
@@ -37,7 +42,7 @@ def get_rewriter():
             ),
             EmbedRewriter(
                 bulk_rules={
-                    embedtype: handler.expand_db_attributes_many
+                    embedtype: bind_expand_many(handler.expand_db_attributes_many)
                     for embedtype, handler in embed_rules.items()
                 },
                 reference_extractors={
@@ -49,12 +54,15 @@ def get_rewriter():
     )
 
 
-def expand_db_html(html):
+def expand_db_html(html, request=None):
     """
-    Expand database-representation HTML into proper HTML usable on front-end templates
+    Expand database-representation HTML into proper HTML usable on front-end templates.
+
+    Pass ``request`` so page links can be resolved against the current site
+    (needed for multi-site / multi-locale URL generation).
     """
     rewriter = get_rewriter()
-    return rewriter(html)
+    return rewriter(html, request=request)
 
 
 def extract_references_from_rich_text(html):
@@ -87,11 +95,35 @@ class RichText:
 
     def __init__(self, source):
         self.source = source or ""
+        self._request = None
+
+    def bind_request(self, request):
+        """
+        Return a copy that expands using ``request`` when rendered as a string.
+
+        Used by ``RichTextBlock`` so custom templates that output ``{{ value }}``
+        (or ``{{ self }}``) hit the same expansion as ``render(request=...)``.
+        """
+        bound = type(self)(self.source)
+        bound._request = request
+        return bound
+
+    def render(self, request=None):
+        """
+        Expand this value to front-end HTML.
+
+        Pass ``request`` so page links resolve against the current site.
+        If omitted, a request previously bound via :meth:`bind_request` is used.
+        """
+        if request is None:
+            request = self._request
+        return render_to_string(
+            "wagtailcore/shared/richtext.html",
+            {"html": expand_db_html(self.source, request=request)},
+        )
 
     def __html__(self):
-        return render_to_string(
-            "wagtailcore/shared/richtext.html", {"html": expand_db_html(self.source)}
-        )
+        return self.render()
 
     def __str__(self):
         return mark_safe(self.__html__())  # noqa: S308 - needs to be safe
@@ -147,10 +179,16 @@ class EntityHandler:
         raise NotImplementedError
 
     @classmethod
-    def expand_db_attributes_many(cls, attrs_list: list[dict]) -> list[str]:
+    def expand_db_attributes_many(
+        cls, attrs_list: list[dict], request=None
+    ) -> list[str]:
         """
         Given a list of attribute dicts from a list of entity tags stored in
         the database, return the real HTML representation of each one.
+
+        ``request`` is available so handlers that generate site-dependent
+        URLs (such as page links) can use it. The default implementation does
+        not pass it to ``expand_db_attributes``.
         """
         return list(map(cls.expand_db_attributes, attrs_list))
 

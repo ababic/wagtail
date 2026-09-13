@@ -2,6 +2,7 @@
 Utility classes for rewriting elements of HTML-like strings
 """
 
+import inspect
 import re
 from collections import defaultdict
 from collections.abc import Callable
@@ -62,7 +63,7 @@ class TagRewriter:
         """Given a dict of attributes from a tag, return the tag type."""
         raise NotImplementedError
 
-    def get_tag_replacements(self, tag_type, attrs_list):
+    def get_tag_replacements(self, tag_type, attrs_list, request=None):
         """Given a list of attribute dicts, all taken from tags of the same type, return a
         corresponding list of replacement strings to replace the tags with.
 
@@ -70,14 +71,16 @@ class TagRewriter:
         """
         raise NotImplementedError
 
-    def __call__(self, html: str) -> str:
+    def __call__(self, html: str, request=None) -> str:
         matches_by_tag_type = self.extract_tags(html)
         matches_to_replace = []
 
         # For each tag type, get the list of replacement strings for all tags of that type
         for tag_type, tag_matches in matches_by_tag_type.items():
             attr_dicts = [match.attrs for match in tag_matches]
-            replacements = self.get_tag_replacements(tag_type, attr_dicts)
+            replacements = self.get_tag_replacements(
+                tag_type, attr_dicts, request=request
+            )
 
             if not replacements:
                 continue
@@ -120,8 +123,8 @@ class TagRewriter:
         return matches_by_tag_type
 
     def convert_rule_to_bulk_rule(self, rule: Callable) -> Callable:
-        def bulk_rule(args):
-            return list(map(rule, args))
+        def bulk_rule(attrs_list, request=None):
+            return list(map(rule, attrs_list))
 
         return bulk_rule
 
@@ -152,7 +155,7 @@ class EmbedRewriter(TagRewriter):
     def get_tag_type_from_attrs(self, attrs):
         return attrs.get("embedtype")
 
-    def get_tag_replacements(self, tag_type, attrs_list):
+    def get_tag_replacements(self, tag_type, attrs_list, request=None):
         try:
             rule = self.bulk_rules[tag_type]
         except KeyError:
@@ -167,7 +170,7 @@ class EmbedRewriter(TagRewriter):
                 rule = self.convert_rule_to_bulk_rule(rule)
 
         # Silently drop any tags with an unrecognised or missing embedtype attribute.
-        return rule(attrs_list) if rule else [""] * len(attrs_list)
+        return rule(attrs_list, request=request) if rule else [""] * len(attrs_list)
 
 
 class LinkRewriter(TagRewriter):
@@ -196,7 +199,7 @@ class LinkRewriter(TagRewriter):
                 elif href.startswith("#"):
                     return "anchor"
 
-    def get_tag_replacements(self, tag_type, attrs_list):
+    def get_tag_replacements(self, tag_type, attrs_list, request=None):
         if not tag_type:
             # We want to leave links without a linktype attribute unchanged,
             # for example <a name="important-anchor">, so we return an empty
@@ -223,7 +226,32 @@ class LinkRewriter(TagRewriter):
                 rule = self.convert_rule_to_bulk_rule(rule)
 
         # Replace unrecognised link types with an empty link.
-        return rule(attrs_list) if rule else ["<a>"] * len(attrs_list)
+        return rule(attrs_list, request=request) if rule else ["<a>"] * len(attrs_list)
+
+
+def bind_expand_many(fn: Callable) -> Callable:
+    """
+    Adapt a bulk expand function so the rewriter can pass ``request``.
+
+    Custom handlers that do not accept ``request`` keep working; those that
+    do receive it as a keyword argument.
+    """
+    try:
+        signature = inspect.signature(fn)
+        accepts_request = "request" in signature.parameters or any(
+            param.kind is inspect.Parameter.VAR_KEYWORD
+            for param in signature.parameters.values()
+        )
+    except (TypeError, ValueError):
+        accepts_request = False
+
+    if accepts_request:
+        return fn
+
+    def wrapper(attrs_list, request=None):
+        return fn(attrs_list)
+
+    return wrapper
 
 
 class MultiRuleRewriter:
@@ -232,9 +260,9 @@ class MultiRuleRewriter:
     def __init__(self, rewriters):
         self.rewriters = rewriters
 
-    def __call__(self, html):
+    def __call__(self, html, request=None):
         for rewrite in self.rewriters:
-            html = rewrite(html)
+            html = rewrite(html, request=request)
         return html
 
     def extract_references(self, html):

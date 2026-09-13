@@ -24,13 +24,17 @@ class PageLinkHandler(LinkHandler):
         return [pages_by_str_id.get(str(id_)) for id_ in instance_ids]
 
     @classmethod
-    def expand_db_attributes(cls, attrs: dict) -> str:
-        return cls.expand_db_attributes_many([attrs])[0]
+    def expand_db_attributes(cls, attrs: dict, request=None) -> str:
+        return cls.expand_db_attributes_many([attrs], request=request)[0]
 
     @classmethod
-    def expand_db_attributes_many(cls, attrs_list: list[dict]) -> list[str]:
+    def expand_db_attributes_many(
+        cls, attrs_list: list[dict], request=None
+    ) -> list[str]:
         return [
-            '<a href="%s">' % escape(page.localized.url) if page else "<a>"
+            '<a href="%s">' % escape(page.localized.get_url(request=request))
+            if page
+            else "<a>"
             for page in cls.get_many(attrs_list)
         ]
 
