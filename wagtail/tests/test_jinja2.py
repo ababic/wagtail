@@ -33,14 +33,6 @@ class TestCoreGlobalsAndFilters(TestCase):
             '<p>Merry <a href="/">Christmas</a>!</p>',
         )
 
-    def test_richtext_uses_request_from_context(self):
-        page = Page.objects.get(pk=2)
-        html = f'<a id="{page.id}" linktype="page">Home</a>'
-        self.assertIn(
-            'href="/"',
-            self.render("{{ text|richtext }}", {"text": html}),
-        )
-
     def test_pageurl(self):
         page = Page.objects.get(pk=2)
         self.assertEqual(self.render("{{ pageurl(page) }}", {"page": page}), page.url)

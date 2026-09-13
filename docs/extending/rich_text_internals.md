@@ -29,7 +29,7 @@ Here, the `linktype` attribute identifies a rule that shall be used to rewrite t
 <p><a href="/contact-us/">Contact us</a> for more information.</p>
 ```
 
-In the case of `RichTextBlock`, the block's value is a `RichText` object which performs this conversion automatically when rendered as a string, so the `|richtext` filter is not necessary. When the block is rendered through StreamField / `{% include_block %}` with a request in context, that request is passed to the same expansion used by `expand_db_html` and `{% richtext %}` (including custom templates that output `{{ value }}`).
+In the case of `RichTextBlock`, the block's value is a `RichText` object which performs this conversion automatically when rendered as a string, so the `|richtext` filter is not necessary. When the block is rendered through StreamField / `{% include_block %}` with a request in context, that request is passed to the same expansion used by `expand_db_html` (including custom templates that output `{{ value }}`). The `|richtext` filter cannot receive a request.
 
 Likewise, an image inside rich text content might be stored as:
 
@@ -120,7 +120,7 @@ You can create custom rewrite handlers to support your own new `linktype` and `e
 
         Optional. The ``expand_db_attributes_many`` method works similarly to ``expand_db_attributes`` but instead takes a list of attribute dictionaries and returns a list of HTML tags. This method is used by rewrite handlers to work in bulk, for example leveraging the ability to make one database query instead of multiple.
 
-        ``request`` is passed when expanding HTML that has a current HTTP request (from ``expand_db_html(html, request=request)``, the ``{% richtext %}`` tag, or ``{{ value|richtext:request }}``). Handlers that generate page URLs can use it to pick the correct site. Custom handlers that do not accept ``request`` continue to work.
+        ``request`` is passed when expanding HTML via ``expand_db_html(html, request=request)`` or ``RichText.render(request=...)`` (including ``RichTextBlock`` when a request is in context). The ``|richtext`` template filter cannot pass a request. Handlers that generate page URLs can use ``request`` to pick the correct site. Custom handlers that do not accept ``request`` continue to work.
 
         Either this method or ``expand_db_attributes`` must be defined in a custom rewrite handler. If not defined, the default implementation of ``expand_db_attributes_many`` works by making a series of calls to ``expand_db_attributes``.
 

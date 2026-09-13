@@ -1,6 +1,5 @@
 from unittest.mock import patch
 
-from django import template
 from django.forms.models import modelform_factory
 from django.test import TestCase, override_settings
 from django.utils import translation
@@ -138,26 +137,6 @@ class TestPageLinkHandlerMultiSite(PageFixturesMixin, TestCase):
     def test_expand_without_request_keeps_legacy_behaviour(self):
         result = PageLinkHandler.expand_db_attributes({"id": self.event_page.id})
         self.assertTrue(result.startswith("<a href="))
-
-    def test_richtext_tag_passes_request_from_context(self):
-        request = get_dummy_request(site=self.fr_site)
-        tpl = template.Template("{% load wagtailcore_tags %}{% richtext html %}")
-        with translation.override("fr"):
-            result = tpl.render(
-                template.RequestContext(request, {"html": self.link_html})
-            )
-        self.assertIn('href="/fr/events/noel/"', result)
-
-    def test_richtext_filter_accepts_request_argument(self):
-        request = get_dummy_request(site=self.fr_site)
-        tpl = template.Template(
-            "{% load wagtailcore_tags %}{{ html|richtext:request }}"
-        )
-        with translation.override("fr"):
-            result = tpl.render(
-                template.Context({"html": self.link_html, "request": request})
-            )
-        self.assertIn('href="/fr/events/noel/"', result)
 
 
 class TestExtractAttrs(TestCase):

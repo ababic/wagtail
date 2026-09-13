@@ -178,7 +178,7 @@ Transform Wagtail's internal HTML representation, expanding internal references 
 {{ page.body|richtext }}
 ```
 
-The Jinja2 filter receives the template context, so page links use the current request when one is present. See [](rich_text_filter) for more information.
+See [](rich_text_filter) for more information.
 
 ### `wagtail_site`
 

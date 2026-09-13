@@ -6,15 +6,11 @@ from markupsafe import Markup, escape
 from .templatetags.wagtailcore_tags import (
     fullpageurl,
     pageurl,
-    render_richtext,
+    richtext,
     slugurl,
     wagtail_site,
     wagtail_version,
 )
-
-
-def _richtext_with_context(context, value):
-    return render_richtext(value, request=context.get("request"))
 
 
 class WagtailCoreExtension(Extension):
@@ -34,7 +30,7 @@ class WagtailCoreExtension(Extension):
         )
         self.environment.filters.update(
             {
-                "richtext": jinja2.pass_context(_richtext_with_context),
+                "richtext": richtext,
             }
         )
 

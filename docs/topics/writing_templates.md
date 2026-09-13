@@ -148,15 +148,13 @@ Only fields using `RichTextField` need this applied in the template.
 {{ page.body|richtext }}
 ```
 
-On multi-site sites, page links inside rich text need the current request so they resolve against the correct hostname and language prefix. Pass it to the filter, or use the `{% richtext %}` tag (which takes the request from the template context automatically):
+```{note}
+The `|richtext` filter cannot receive the current HTTP request: Django template filters do not have access to the template context. On multi-site sites, page links expanded with `{{ page.body|richtext }}` may therefore resolve against the wrong hostname or language prefix.
 
-```html+django
-{% load wagtailcore_tags %}
-{{ page.body|richtext:request }}
-{% richtext page.body %}
+Pass `request` to `expand_db_html()` from Python, or render the value through `RichTextBlock` / `{% include_block %}` so the request is available.
 ```
 
-`RichTextBlock` values (including those nested in StreamField, ListBlock, or `{% include_block %}`) use the same expansion when a request is in the template context, so custom block templates that output `{{ value }}` get the same page URLs.
+`RichTextBlock` values (including those nested in StreamField, ListBlock, or `{% include_block %}`) use the same expansion as `expand_db_html(..., request=request)` when a request is in the template context, so custom block templates that output `{{ value }}` get the same page URLs.
 
 (responsive_embeds)=
 

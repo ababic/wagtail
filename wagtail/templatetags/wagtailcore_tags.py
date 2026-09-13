@@ -115,26 +115,18 @@ def wagtail_feature_release_editor_guide_link():
     return "https://guide.wagtail.org/"
 
 
-def render_richtext(value, request=None):
-    """
-    Expand a rich text value to front-end HTML.
-
-    ``request`` is used when expanding page links so URLs can be generated
-    for the current site. Without it, multi-site setups may produce the
-    wrong hostname / language prefix.
-    """
+@register.filter
+def richtext(value):
     if isinstance(value, RichText):
-        if request is None:
-            # passing a RichText value through the |richtext filter should have no effect
-            return value
-        return value.render(request=request)
+        # passing a RichText value through the |richtext filter should have no effect
+        return value
     elif value is None:
         html = ""
     else:
         if isinstance(value, Promise):
             value = str(value)
         if isinstance(value, str):
-            html = expand_db_html(value, request=request)
+            html = expand_db_html(value)
         else:
             raise TypeError(
                 "'richtext' template filter received an invalid value; expected string, got {}.".format(
@@ -142,16 +134,6 @@ def render_richtext(value, request=None):
                 )
             )
     return render_to_string("wagtailcore/shared/richtext.html", {"html": html})
-
-
-@register.filter(name="richtext")
-def richtext(value, request=None):
-    return render_richtext(value, request=request)
-
-
-@register.simple_tag(takes_context=True, name="richtext")
-def richtext_tag(context, value):
-    return render_richtext(value, request=context.get("request"))
 
 
 class IncludeBlockNode(template.Node):
