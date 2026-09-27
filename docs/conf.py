@@ -111,6 +111,18 @@ if not on_rtd:
 if on_rtd or os.environ.get("BUILD_LLMS_TXT", ""):
     extensions.append("sphinx_llm.txt")
 
+# Generate llms-full.txt, which is linked from support.md.
+# sphinx-llm 1.1.0 turned this off by default.
+llms_txt_full_build = True
+
+# sphinx-markdown-builder, which sphinx-llm uses for llms.txt, cannot render
+# these nodes. As of sphinx-llm 1.1.0 those warnings reach the main Sphinx
+# build, which fails when warnings are treated as errors.
+# - abbreviation: the keyword-only `*` separator in Python signatures
+#   (https://github.com/liran-funaro/sphinx-markdown-builder/issues/42)
+# - toctree: the hidden toctree in deployment/index.md
+llms_txt_suppress_unknown_node_warnings = ["abbreviation", "toctree"]
+
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
 
