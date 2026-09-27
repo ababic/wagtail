@@ -7,6 +7,25 @@ from wagtail.models import PageViewRestriction
 Page = swapper.load_model("wagtailcore", "Page")
 
 
+def page_is_visible_to_request(request, page):
+    """
+    Return whether ``page`` is live and accessible for ``request`` under
+    front-end view restrictions (the same rules as the public pages API).
+    """
+    if not page.live:
+        return False
+
+    for restriction in PageViewRestriction.objects.all().select_related("page"):
+        if not restriction.accept_request(request):
+            restricted_page = restriction.page
+            if page.pk == restricted_page.pk or page.is_descendant_of(
+                restricted_page
+            ):
+                return False
+
+    return True
+
+
 def get_public_pages_queryset(request, model=Page):
     """
     Returns a queryset containing all live, public pages visible to anonymous

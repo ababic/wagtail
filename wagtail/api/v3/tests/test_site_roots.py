@@ -1,9 +1,12 @@
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from wagtail.api.v3.site_roots import build_site_roots_list, live_site_roots
+from wagtail.api.v3.site_roots import (
+    build_site_roots_list,
+    visible_live_site_roots,
+)
 from wagtail.api.v3.tests.base import TestV3Base
-from wagtail.models import Locale, Site
+from wagtail.models import BaseViewRestriction, Locale, Site
 from wagtail.test.utils import Page, PageFixturesMixin, WagtailTestUtils
 
 SITE_ROOT_FIELDS = {
@@ -36,6 +39,27 @@ class TestV3SiteRootsListing(
         response = self.get_response()
         self.assertEqual(response.status_code, 200)
 
+    def test_login_gated_root_excluded_for_anonymous(self):
+        default_site = Site.objects.get(is_default_site=True)
+        default_site.root_page.view_restrictions.create(
+            restriction_type=BaseViewRestriction.LOGIN
+        )
+        content = self.get_response().json()
+        self.assertEqual(content["count"], Site.objects.count() - 1)
+        site_ids = {item["id"] for item in content["items"]}
+        self.assertNotIn(default_site.id, site_ids)
+
+    def test_login_gated_root_included_when_authenticated(self):
+        default_site = Site.objects.get(is_default_site=True)
+        default_site.root_page.view_restrictions.create(
+            restriction_type=BaseViewRestriction.LOGIN
+        )
+        self.login()
+        content = self.get_response().json()
+        self.assertEqual(content["count"], Site.objects.count())
+        site_ids = {item["id"] for item in content["items"]}
+        self.assertIn(default_site.id, site_ids)
+
     def test_response_fields(self):
         content = self.get_response().json()
         self.assertIn("count", content)
@@ -62,10 +86,13 @@ class TestV3SiteRootsListing(
         )
 
     def test_ordering_matches_get_site_root_paths(self):
-        content = self.get_response().json()
+        response = self.get_response()
+        content = response.json()
         site_ids_from_api = [item["id"] for item in content["items"]]
         site_ids_from_model = []
-        for live_root in live_site_roots(Site.get_site_root_paths()):
+        for live_root in visible_live_site_roots(
+            response.wsgi_request, Site.get_site_root_paths()
+        ):
             site_id = live_root.site_root_path.site_id
             if site_id not in site_ids_from_model:
                 site_ids_from_model.append(site_id)
@@ -80,6 +107,13 @@ class TestV3SiteRootsListing(
         self.assertIn("s-maxage=300", response["Cache-Control"])
         self.assertIn("stale-while-revalidate=600", response["Cache-Control"])
         self.assertIn("Accept-Encoding", response["Vary"])
+        self.assertIn("Authorization", response["Vary"])
+
+    def test_authenticated_http_cache_is_private(self):
+        self.login()
+        response = self.get_response()
+        self.assertIn("private", response["Cache-Control"])
+        self.assertIn("Authorization", response["Vary"])
 
     def test_etag_returns_304(self):
         first_response = self.get_response()

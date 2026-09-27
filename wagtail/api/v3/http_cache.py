@@ -12,6 +12,8 @@ def respond_with_http_cache(
     max_age=300,
     s_maxage=300,
     stale_while_revalidate=600,
+    public=True,
+    vary=None,
 ):
     """
     Return a JSON response with weak ETag and shared HTTP cache headers.
@@ -29,10 +31,14 @@ def respond_with_http_cache(
     response["ETag"] = etag
     patch_cache_control(
         response,
-        public=True,
+        public=public,
+        private=not public,
         max_age=max_age,
         s_maxage=s_maxage,
         stale_while_revalidate=stale_while_revalidate,
     )
-    response["Vary"] = "Accept-Encoding"
+    vary_headers = ["Accept-Encoding"]
+    if vary:
+        vary_headers.extend(vary)
+    response["Vary"] = ", ".join(vary_headers)
     return response

@@ -4,7 +4,9 @@
 
 Site roots are exposed at `/api/v3/site-roots/` as a public read-only endpoint for headless routing. Anonymous requests are allowed, like redirects and public page reads. See [](api_v3_authentication) for how tokens map to permissions.
 
-- `GET /site-roots/`: list all sites with their homepage URLs grouped by locale.
+- `GET /site-roots/`: list sites with their homepage URLs grouped by locale.
+
+Each entry is included only when its homepage is live and visible to the caller under front-end view restrictions (the same rules as the public pages API). For example, a login-gated homepage is omitted for anonymous requests but included when the request carries a bearer token for a logged-in user.
 
 The response is not paginated. Each site includes `id`, `hostname`, `port`, `site_name`, `is_default_site`, and a `urls` array. Each URL entry has `language_code`, `page_id`, and `html_url` for that site's live homepage in that locale.
 
@@ -30,7 +32,7 @@ The response is not paginated. Each site includes `id`, `hostname`, `port`, `sit
 }
 ```
 
-When internationalisation is enabled, a site may have multiple `urls` entries (one per live root page translation). Draft or unpublished root pages are excluded. The ordering of sites and locales matches `Site.get_site_root_paths()` for the live roots that remain.
+When internationalisation is enabled, a site may have multiple `urls` entries (one per live, visible root page translation). Draft or unpublished root pages are excluded. The ordering of sites and locales matches `Site.get_site_root_paths()` for the live, visible roots that remain.
 
 This endpoint is separate from `/api/v3/sites/`, which is permission-gated CRUD for site administration. Site roots expose only the URL-resolution data needed by frontends.
 
@@ -38,9 +40,9 @@ This endpoint is separate from `/api/v3/sites/`, which is permission-gated CRUD 
 
 The endpoint reuses Wagtail's existing `Site.get_site_root_paths()` cache and invalidation (site saves/deletes and site root page changes). The HTTP response also includes:
 
-- `Cache-Control: public, max-age=300, s-maxage=300, stale-while-revalidate=600`
+- `Cache-Control: public, max-age=300, s-maxage=300, stale-while-revalidate=600` for anonymous requests, or `private` with `Vary: Authorization` when a bearer token is used
 - A weak `ETag` for conditional requests (`If-None-Match`)
-- `Vary: Accept-Encoding`
+- `Vary: Accept-Encoding` (and `Authorization` for authenticated responses)
 
 `html_url` is resolved via ``Page.get_full_url()``, so headless projects can override ``Page.get_url_parts()`` to return custom URLs. It is `null` when the page is not routable (for example when `wagtail_serve` is not registered).
 

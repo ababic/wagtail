@@ -17,4 +17,12 @@ router = Router(tags=["site-roots"], auth=[BearerTokenAuth(), AllowAnonymous()])
     operation_id="site_roots_list",
 )
 def list_site_roots(request: HttpRequest):
-    return respond_with_http_cache(request, build_site_roots_list(request))
+    # Root visibility depends on view restrictions, which differ for anonymous
+    # and authenticated callers (for example login-gated homepages).
+    public_cache = not request.user.is_authenticated
+    return respond_with_http_cache(
+        request,
+        build_site_roots_list(request),
+        public=public_cache,
+        vary=["Authorization"],
+    )

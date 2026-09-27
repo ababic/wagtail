@@ -2,6 +2,7 @@ from collections import namedtuple
 
 import swapper
 
+from wagtail.api.querysets import page_is_visible_to_request
 from wagtail.models import Site
 
 Page = swapper.load_model("wagtailcore", "Page")
@@ -38,15 +39,27 @@ def live_site_roots(site_root_paths):
     ]
 
 
+def visible_live_site_roots(request, site_root_paths):
+    """Live site roots whose homepage is visible to ``request``."""
+    return [
+        live_root
+        for live_root in live_site_roots(site_root_paths)
+        if page_is_visible_to_request(request, live_root.page)
+    ]
+
+
 def build_site_roots_list(request):
     """
     Assemble the site-roots API payload from ``Site.get_site_root_paths()``.
 
     Site metadata comes from a light queryset; locale URLs reuse the cached
-    ``SiteRootPath`` rows and ``Page.get_full_url()``. Only live root pages
-    are included.
+    ``SiteRootPath`` rows and ``Page.get_full_url()``. Only live, request-
+    visible root pages are included (draft roots and view-restricted roots
+    the caller cannot access are omitted).
     """
-    live_roots = live_site_roots(Site.get_site_root_paths(request=request))
+    live_roots = visible_live_site_roots(
+        request, Site.get_site_root_paths(request=request)
+    )
 
     site_order = []
     roots_by_site = {}
